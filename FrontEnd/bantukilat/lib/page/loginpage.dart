@@ -150,16 +150,32 @@ class _LoginPageState extends State<LoginPage> {
                   padding: EdgeInsets.fromLTRB(0, 8, 0, 0),
                   child: Align(
                     alignment: Alignment.centerLeft,
-                    child: Text(
-                      "Password",
-                      textAlign: TextAlign.start,
-                      overflow: TextOverflow.clip,
-                      style: TextStyle(
-                        fontWeight: FontWeight.w600,
-                        fontStyle: FontStyle.normal,
-                        fontSize: 14,
-                        color: Color(0xff404e46),
-                      ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          "Password",
+                          textAlign: TextAlign.start,
+                          overflow: TextOverflow.clip,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontStyle: FontStyle.normal,
+                            fontSize: 14,
+                            color: Color(0xff404e46),
+                          ),
+                        ),
+                        Text(
+                          "Lupa password?",
+                          textAlign: TextAlign.start,
+                          overflow: TextOverflow.clip,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w400,
+                            fontStyle: FontStyle.normal,
+                            fontSize: 14,
+                            color: Color(0xFFA36700),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
