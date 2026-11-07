@@ -14,7 +14,7 @@ class _LoginPageState extends State<LoginPage> {
   );
 
   bool _isObscure = true;
-  bool _rememberMe = true;
+  bool _rememberMe = false;
 
   @override
   void dispose() {
@@ -67,7 +67,7 @@ class _LoginPageState extends State<LoginPage> {
                     textAlign: TextAlign.center,
                     overflow: TextOverflow.clip,
                     style: TextStyle(
-                      fontWeight: FontWeight.w300,
+                      fontWeight: FontWeight.w500,
                       fontStyle: FontStyle.normal,
                       fontSize: 12,
                       color: Color(0xff414f47),
@@ -127,10 +127,10 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                     hintText: "user@gmail.com",
                     hintStyle: const TextStyle(
-                      fontWeight: FontWeight.w500,
+                      fontWeight: FontWeight.w400,
                       fontStyle: FontStyle.normal,
                       fontSize: 14,
-                      color: Color(0xff3d4a42),
+                      color: Color(0xff3b4840),
                     ),
                     filled: true,
                     fillColor: const Color(0xfff3f4ff),
@@ -271,7 +271,7 @@ class _LoginPageState extends State<LoginPage> {
                       textAlign: TextAlign.start,
                       overflow: TextOverflow.clip,
                       style: TextStyle(
-                        fontWeight: FontWeight.w300,
+                        fontWeight: FontWeight.w500,
                         fontStyle: FontStyle.normal,
                         fontSize: 12,
                         color: Color(0xff414f47),
