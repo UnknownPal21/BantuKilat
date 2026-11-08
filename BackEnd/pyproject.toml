@@ -1,0 +1,15 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Ini adalah bagaian backend untuk project lomba yang bernama BantuKilat"
+readme = "README.md"
+authors = [{ name = "Danannme", email = "noragamiaragotoyato92@gmail.com" }]
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi[standard]>=0.162.2",
+    "motor>=3.7.1",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
