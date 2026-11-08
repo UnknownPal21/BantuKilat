@@ -1,3 +1,4 @@
+import 'package:bantukilat/page/forgotpassword.dart';
 import 'package:bantukilat/page/registerpage.dart';
 import 'package:flutter/material.dart';
 
@@ -11,7 +12,7 @@ class LoginPage extends StatefulWidget {
 class _LoginPageState extends State<LoginPage> {
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController(
-    text: "123456",
+    text: "",
   );
 
   bool _isObscure = true;
@@ -147,7 +148,7 @@ class _LoginPageState extends State<LoginPage> {
                                 fontWeight: FontWeight.w400,
                                 fontStyle: FontStyle.normal,
                                 fontSize: 14,
-                                color: Color(0xff3b4840),
+                                color: Color.fromARGB(255, 170, 183, 175),
                               ),
                               filled: true,
                               fillColor: const Color(0xfff3f4ff),
@@ -163,15 +164,15 @@ class _LoginPageState extends State<LoginPage> {
                               ),
                             ),
                           ),
-                          const Padding(
-                            padding: EdgeInsets.fromLTRB(0, 8, 0, 0),
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(0, 8, 0, 0),
                             child: Align(
                               alignment: Alignment.centerLeft,
                               child: Row(
                                 mainAxisAlignment:
                                     MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text(
+                                  const Text(
                                     "Password",
                                     textAlign: TextAlign.start,
                                     overflow: TextOverflow.clip,
@@ -182,16 +183,27 @@ class _LoginPageState extends State<LoginPage> {
                                       color: Color(0xff404e46),
                                     ),
                                   ),
-                                  Text(
-                                    "Lupa password?",
-                                    textAlign: TextAlign.start,
-                                    overflow: TextOverflow.clip,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w400,
-                                      fontStyle: FontStyle.normal,
-                                      fontSize: 14,
-                                      color: Color(0xFFA36700),
+                                  InkWell(
+                                    child: const Text(
+                                      "Lupa password?",
+                                      textAlign: TextAlign.start,
+                                      overflow: TextOverflow.clip,
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w400,
+                                        fontStyle: FontStyle.normal,
+                                        fontSize: 14,
+                                        color: Color(0xFFA36700),
+                                      ),
                                     ),
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              const ForgotPasswordPage(),
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ],
                               ),
@@ -237,7 +249,7 @@ class _LoginPageState extends State<LoginPage> {
                                   fontWeight: FontWeight.w400,
                                   fontStyle: FontStyle.normal,
                                   fontSize: 14,
-                                  color: Color(0xff000000),
+                                  color: Color.fromARGB(255, 170, 183, 175),
                                 ),
                                 filled: true,
                                 fillColor: const Color(0xfff0f2ff),

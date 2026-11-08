@@ -1,3 +1,4 @@
+import 'package:bantukilat/page/loginpage.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
@@ -13,7 +14,7 @@ class _RegisterPageState extends State<RegisterPage> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController(
-    text: "123456",
+    text: "",
   );
   final TextEditingController _whatsappController = TextEditingController();
   final TextEditingController _kotaController = TextEditingController();
@@ -282,7 +283,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                   fontWeight: FontWeight.w400,
                                   fontStyle: FontStyle.normal,
                                   fontSize: 14,
-                                  color: Color(0xff3b4840),
+                                  color: Color.fromARGB(255, 170, 183, 175),
                                 ),
                                 filled: true,
                                 fillColor: const Color(0xfff3f4ff),
@@ -370,7 +371,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                   fontWeight: FontWeight.w400,
                                   fontStyle: FontStyle.normal,
                                   fontSize: 14,
-                                  color: Color(0xff3b4840),
+                                  color: Color.fromARGB(255, 170, 183, 175),
                                 ),
                                 filled: true,
                                 fillColor: const Color(0xfff3f4ff),
@@ -475,7 +476,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                     fontWeight: FontWeight.w400,
                                     fontStyle: FontStyle.normal,
                                     fontSize: 14,
-                                    color: Color(0xff000000),
+                                    color: Color.fromARGB(255, 170, 183, 175),
                                   ),
                                   filled: true,
                                   fillColor: const Color(0xfff0f2ff),
@@ -578,7 +579,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                   fontWeight: FontWeight.w400,
                                   fontStyle: FontStyle.normal,
                                   fontSize: 14,
-                                  color: Color(0xff3b4840),
+                                  color: Color.fromARGB(255, 170, 183, 175),
                                 ),
                                 filled: true,
                                 fillColor: const Color(0xfff3f4ff),
@@ -746,7 +747,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                 fontWeight: FontWeight.w400,
                                 fontStyle: FontStyle.normal,
                                 fontSize: 14,
-                                color: Color(0xff3b4840),
+                                color: Color.fromARGB(255, 170, 183, 175),
                               ),
                               filled: true,
                               fillColor: const Color(0xfff3f4ff),
@@ -834,7 +835,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                 fontWeight: FontWeight.w400,
                                 fontStyle: FontStyle.normal,
                                 fontSize: 14,
-                                color: Color(0xff3b4840),
+                                color: Color.fromARGB(255, 170, 183, 175),
                               ),
                               filled: true,
                               fillColor: const Color(0xfff3f4ff),
@@ -888,7 +889,7 @@ class _RegisterPageState extends State<RegisterPage> {
                             obscureText: false,
                             keyboardType: TextInputType.text,
                             textAlign: TextAlign.start,
-                            maxLines: 2,
+                            maxLines: 1,
                             style: const TextStyle(
                               fontWeight: FontWeight.w400,
                               fontStyle: FontStyle.normal,
@@ -922,7 +923,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                 fontWeight: FontWeight.w400,
                                 fontStyle: FontStyle.normal,
                                 fontSize: 14,
-                                color: Color(0xff3b4840),
+                                color: Color.fromARGB(255, 170, 183, 175),
                               ),
                               filled: true,
                               fillColor: const Color(0xfff3f4ff),
@@ -987,7 +988,12 @@ class _RegisterPageState extends State<RegisterPage> {
                         ),
                         GestureDetector(
                           onTap: () {
-                            Navigator.pop(context);
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => LoginPage(),
+                              ),
+                            );
                           },
                           child: const Text(
                             " Masuk disini",
