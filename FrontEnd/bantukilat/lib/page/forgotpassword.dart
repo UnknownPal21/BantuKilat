@@ -1,4 +1,3 @@
-import 'package:bantukilat/page/HomePageTeknisi.dart';
 import 'package:bantukilat/page/registerpage.dart';
 import 'package:flutter/material.dart';
 
@@ -14,9 +13,6 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   final TextEditingController _passwordController = TextEditingController(
     text: "",
   );
-
-  bool _isObscure = true;
-  bool _rememberMe = false;
 
   @override
   void dispose() {
