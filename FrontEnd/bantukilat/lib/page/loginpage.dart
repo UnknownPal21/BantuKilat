@@ -1,5 +1,7 @@
+import 'package:bantukilat/page/HomePageTeknisi.dart';
 import 'package:bantukilat/page/RegisterTeknisi.dart';
 import 'package:bantukilat/page/forgotpassword.dart';
+import 'package:bantukilat/page/homepageuser.dart';
 import 'package:bantukilat/page/registerpage.dart';
 import 'package:flutter/material.dart';
 
@@ -316,7 +318,25 @@ class _LoginPageState extends State<LoginPage> {
                             padding: const EdgeInsets.fromLTRB(0, 10, 0, 15),
                             child: MaterialButton(
                               onPressed: () {
-                                // Aksi login menggunakan _emailController.text dan _passwordController.text
+                                if (_emailController.text == "user") {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const HomePageUser(),
+                                    ),
+                                  );
+                                  return;
+                                }
+                                if (_emailController.text == "teknisi") {
+                                  Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          const HomePageTeknisi(),
+                                    ),
+                                  );
+                                }
                               },
                               color: const Color(0xff006747),
                               elevation: 0,
