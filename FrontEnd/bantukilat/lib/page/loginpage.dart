@@ -1,3 +1,4 @@
+import 'package:bantukilat/page/RegisterTeknisi.dart';
 import 'package:bantukilat/page/forgotpassword.dart';
 import 'package:bantukilat/page/registerpage.dart';
 import 'package:flutter/material.dart';
@@ -139,7 +140,7 @@ class _LoginPageState extends State<LoginPage> {
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12.0),
                                 borderSide: const BorderSide(
-                                  color: Color(0xff3d4a42),
+                                  color: Color.fromARGB(0, 61, 74, 66),
                                   width: 1,
                                 ),
                               ),
@@ -192,7 +193,7 @@ class _LoginPageState extends State<LoginPage> {
                                         fontWeight: FontWeight.w400,
                                         fontStyle: FontStyle.normal,
                                         fontSize: 14,
-                                        color: Color(0xFFA36700),
+                                        color: Color(0xff006848),
                                       ),
                                     ),
                                     onTap: () {
@@ -240,7 +241,7 @@ class _LoginPageState extends State<LoginPage> {
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12.0),
                                   borderSide: const BorderSide(
-                                    color: Color(0xff3d4b43),
+                                    color: Color.fromARGB(0, 61, 75, 67),
                                     width: 1,
                                   ),
                                 ),
@@ -396,7 +397,12 @@ class _LoginPageState extends State<LoginPage> {
                                 ),
                                 GestureDetector(
                                   onTap: () {
-                                    // Navigasi ke halaman Register Teknisi
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => RegisterTeknisi(),
+                                      ),
+                                    );
                                   },
                                   child: const Text(
                                     " Daftar teknisi disini",

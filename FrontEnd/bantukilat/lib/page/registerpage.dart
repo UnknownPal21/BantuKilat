@@ -274,8 +274,8 @@ class _RegisterPageState extends State<RegisterPage> {
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12.0),
                                   borderSide: const BorderSide(
-                                    color: Color(0xff3d4a42),
-                                    width: 1,
+                                    color: Color.fromARGB(0, 61, 74, 66),
+                                    width: 0,
                                   ),
                                 ),
                                 hintText: "John Doe",
@@ -362,7 +362,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12.0),
                                   borderSide: const BorderSide(
-                                    color: Color(0xff3d4a42),
+                                    color: Color.fromARGB(0, 61, 74, 66),
                                     width: 1,
                                   ),
                                 ),
@@ -422,14 +422,14 @@ class _RegisterPageState extends State<RegisterPage> {
                                       ],
                                     ),
                                     Text(
-                                      "Lupa password?",
+                                      "Minimal 8 karakter",
                                       textAlign: TextAlign.start,
                                       overflow: TextOverflow.clip,
                                       style: TextStyle(
                                         fontWeight: FontWeight.w400,
                                         fontStyle: FontStyle.normal,
-                                        fontSize: 14,
-                                        color: Color(0xFFA36700),
+                                        fontSize: 12,
+                                        color: Color(0xff006848),
                                       ),
                                     ),
                                   ],
@@ -467,7 +467,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                   enabledBorder: OutlineInputBorder(
                                     borderRadius: BorderRadius.circular(12.0),
                                     borderSide: const BorderSide(
-                                      color: Color(0xff3d4b43),
+                                      color: Color.fromARGB(0, 61, 75, 67),
                                       width: 1,
                                     ),
                                   ),
@@ -570,7 +570,7 @@ class _RegisterPageState extends State<RegisterPage> {
                                 enabledBorder: OutlineInputBorder(
                                   borderRadius: BorderRadius.circular(12.0),
                                   borderSide: const BorderSide(
-                                    color: Color(0xff3d4a42),
+                                    color: Color.fromARGB(0, 61, 74, 66),
                                     width: 1,
                                   ),
                                 ),
@@ -738,7 +738,7 @@ class _RegisterPageState extends State<RegisterPage> {
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12.0),
                                 borderSide: const BorderSide(
-                                  color: Color(0xff3d4a42),
+                                  color: Color.fromARGB(0, 61, 74, 66),
                                   width: 1,
                                 ),
                               ),
@@ -826,7 +826,7 @@ class _RegisterPageState extends State<RegisterPage> {
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12.0),
                                 borderSide: const BorderSide(
-                                  color: Color(0xff3d4a42),
+                                  color: Color.fromARGB(0, 61, 74, 66),
                                   width: 1,
                                 ),
                               ),
@@ -914,7 +914,7 @@ class _RegisterPageState extends State<RegisterPage> {
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12.0),
                                 borderSide: const BorderSide(
-                                  color: Color(0xff3d4a42),
+                                  color: Color.fromARGB(0, 61, 74, 66),
                                   width: 1,
                                 ),
                               ),

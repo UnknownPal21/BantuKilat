@@ -138,7 +138,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(12.0),
                                 borderSide: const BorderSide(
-                                  color: Color(0xff3d4a42),
+                                  color: Color.fromARGB(0, 61, 74, 66),
                                   width: 1,
                                 ),
                               ),
