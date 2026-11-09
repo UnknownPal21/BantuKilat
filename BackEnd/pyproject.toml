@@ -6,7 +6,10 @@ readme = "README.md"
 authors = [{ name = "Danannme", email = "noragamiaragotoyato92@gmail.com" }]
 requires-python = ">=3.12"
 dependencies = [
+    "argon2-cffi>=25.1.0",
     "fastapi[standard]>=0.162.2",
+    "pydantic-settings>=2.16.2",
+    "pyjwt>=2.15.1",
     "pymongo>=4.19.0",
 ]
 
