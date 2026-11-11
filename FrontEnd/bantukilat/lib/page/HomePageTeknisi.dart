@@ -1,3 +1,4 @@
+import 'package:bantukilat/page/DetailTawaran.dart';
 import 'package:flutter/material.dart';
 
 class HomePageTeknisi extends StatefulWidget {
@@ -800,27 +801,48 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                                       ),
                                     ),
                                   ),
-                                  Container(
-                                    margin: const EdgeInsets.all(0),
-                                    padding: const EdgeInsets.all(0),
-                                    width: 110,
-                                    height: 40,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xff006546),
-                                      shape: BoxShape.rectangle,
-                                      borderRadius: BorderRadius.circular(10.0),
-                                    ),
-                                    child: const Align(
-                                      alignment: Alignment.center,
-                                      child: Text(
-                                        "Detail Tawaran",
-                                        textAlign: TextAlign.start,
-                                        overflow: TextOverflow.clip,
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                          fontStyle: FontStyle.normal,
-                                          fontSize: 13,
-                                          color: Color(0xffffffff),
+                                  InkWell(
+                                    onTap: () {
+                                      Navigator.push(
+                                        context,
+                                        MaterialPageRoute(
+                                          builder: (context) =>
+                                              const DetailTawaran(
+                                                title: "Kran Pipa Ancur",
+                                                previewImage: "assets/images/dummy.png", // Bisa diisi path asset atau URL foto dari FastAPI
+                                                description: "Kran patah di drat tembok, air meluap ke kamar tidur! Butuh bantuan segera sebelum banjir ke kasur.",
+                                                mapImage:
+                                                    "assets/images/dummy.png",
+                                                addressDetail: "RT 02 No. 14, Depan Pos Ronda",
+                                                initialWage: 15000, // Otomatis dihitung jadi +5rb (20rb), +15rb (30rb), +30rb (45rb)
+                                              ),
+                                        ),
+                                      );
+                                    },
+                                    child: Container(
+                                      margin: const EdgeInsets.all(0),
+                                      padding: const EdgeInsets.all(0),
+                                      width: 110,
+                                      height: 40,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xff006546),
+                                        shape: BoxShape.rectangle,
+                                        borderRadius: BorderRadius.circular(
+                                          10.0,
+                                        ),
+                                      ),
+                                      child: const Align(
+                                        alignment: Alignment.center,
+                                        child: Text(
+                                          "Detail Tawaran",
+                                          textAlign: TextAlign.start,
+                                          overflow: TextOverflow.clip,
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w600,
+                                            fontStyle: FontStyle.normal,
+                                            fontSize: 13,
+                                            color: Color(0xffffffff),
+                                          ),
                                         ),
                                       ),
                                     ),

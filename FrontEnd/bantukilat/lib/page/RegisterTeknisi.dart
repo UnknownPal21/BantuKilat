@@ -1275,7 +1275,7 @@ class _RegisterTeknisiState extends State<RegisterTeknisi> {
                 ],
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(0, 10, 0, 15),
+                padding: const EdgeInsets.fromLTRB(0, 10, 0, 35),
                 child: MaterialButton(
                   onPressed: () {
                     // Aksi login menggunakan _emailController.text dan _passwordController.text

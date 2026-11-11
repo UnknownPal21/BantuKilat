@@ -1,3 +1,4 @@
+import 'package:bantukilat/page/TawaranSaya.dart';
 import 'package:flutter/material.dart';
 
 class HomePageUser extends StatefulWidget {
@@ -127,7 +128,10 @@ class _HomePageUserState extends State<HomePageUser> {
               ),
               InkWell(
                 onTap: () {
-                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (context) => TawaranSaya()),
+                  );
                 },
                 child: Container(
                   margin: const EdgeInsets.symmetric(
@@ -454,7 +458,7 @@ class _HomePageUserState extends State<HomePageUser> {
                   margin: const EdgeInsets.all(0),
                   padding: const EdgeInsets.all(10),
                   width: MediaQuery.of(context).size.width,
-                  height: 300,
+                  height: MediaQuery.of(context).size.height * 0.5,
                   decoration: const BoxDecoration(
                     color: Color(0x00000000),
                     shape: BoxShape.rectangle,
@@ -570,7 +574,12 @@ class KategoriLayananCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => TawaranSaya()),
+        );
+      },
       child: Card(
         margin: const EdgeInsets.all(4),
         color: const Color(0xffffffff),
