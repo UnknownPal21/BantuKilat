@@ -63,3 +63,22 @@ class TokenOut(BaseModel):
     expires_in: int
     user: UserOut
     needs_phone: bool
+
+
+class MeOut(BaseModel):
+    # phone None-able: akun Google tanpa WhatsApp punya phone = null.
+    # Di UserOut field ini wajib str, jadi MeOut tidak bisa memakai UserOut.
+    id: str = Field(alias="_id")
+    role: Literal["USER", "TECHNICIAN"]
+    name: str
+    email: EmailStr
+    phone: str | None = None
+    avatar_url: str | None = None
+    needs_phone: bool
+    tech: dict | None = None
+
+
+class PhoneUpdateIn(BaseModel):
+    phone: str
+
+    model_config = {"extra": "forbid"}

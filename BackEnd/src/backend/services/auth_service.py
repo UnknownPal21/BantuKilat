@@ -36,6 +36,19 @@ def _token_response(doc: dict) -> dict:
     }
 
 
+def _me_response(doc: dict) -> dict:
+    return {
+        "_id": str(doc["_id"]),
+        "role": doc["role"],
+        "name": doc["name"],
+        "email": doc["email"],
+        "phone": doc.get("phone"),
+        "avatar_url": doc.get("avatar_url"),
+        "needs_phone": not doc.get("phone"),
+        "tech": doc.get("tech"),
+    }
+
+
 def _map_duplicate(exc: DuplicateKeyError) -> ApiError:
     # index mana yang bentrok: email / phone / google_sub
     key = exc.details.get("keyPattern", {}) if exc.details else {}
@@ -111,3 +124,26 @@ async def login(payload: LoginIn) -> dict:
         raise ApiError(403, "ACCOUNT_DISABLED", "Akun dinonaktifkan")
 
     return _token_response(user)
+
+
+async def me(user: dict) -> dict:
+    """Dokumen user sudah lengkap dari get_current_user, tidak perlu query ulang."""
+    return _me_response(user)
+
+
+async def update_phone(user: dict, phone: str) -> dict:
+    phone = phone.strip()
+    if not phone:
+        # Guard paling minimum. Validasi format E.164 menyusul.
+        raise ApiError(422, "VALIDATION_ERROR", "Nomor WhatsApp tidak boleh kosong")
+
+    try:
+        await db.users.update_one(
+            {"_id": user["_id"]},
+            {"$set": {"phone": phone, "updated_at": _now()}},
+        )
+    except DuplicateKeyError as exc:
+        raise _map_duplicate(exc) from exc
+
+    updated = await db.users.find_one({"_id": user["_id"]})
+    return _me_response(updated)
