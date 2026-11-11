@@ -8,6 +8,7 @@ client = AsyncMongoClient(
 
 
 db = client[settings.mongo_db_name]
+users = db["users"]
 
 
 async def close_client() -> None:

@@ -1,5 +1,6 @@
-from backend.db.mongo import db
 import asyncio
+
+from backend.db.mongo import db
 
 
 async def ensure_indexes():

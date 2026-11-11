@@ -1,5 +1,6 @@
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from backend.routers.auth import router as auth_router
 
 from fastapi import FastAPI
 
@@ -16,6 +17,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 app = FastAPI(lifespan=lifespan, title="BantuKilatAPI", version="0.1.0")
 app.add_exception_handler(ApiError, api_error_handler)
+
+app.include_router(auth_router)
 
 
 @app.get("/health")
