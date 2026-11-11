@@ -54,7 +54,7 @@ class _DetailTawaranState extends State<DetailTawaran> {
   void _openFullScreenImage(String imagePath, String label) {
     showDialog(
       context: context,
-      barrierColor: Colors.black.withOpacity(0.92),
+      barrierColor: Colors.black.withValues(alpha: 0.92),
       builder: (ctx) => Dialog(
         backgroundColor: Colors.transparent,
         insetPadding: EdgeInsets.zero,
@@ -176,7 +176,7 @@ class _DetailTawaranState extends State<DetailTawaran> {
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xff006a49).withOpacity(0.12),
+                            color: const Color(0xff006a49).withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: const Icon(

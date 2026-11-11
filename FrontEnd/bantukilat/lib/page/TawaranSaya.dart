@@ -15,12 +15,29 @@ class TawaranSaya extends StatefulWidget {
 }
 
 class _TawaranSayaState extends State<TawaranSaya> {
+  final TextEditingController _judulController = TextEditingController();
+  final TextEditingController _detailController = TextEditingController();
   final TextEditingController _alamatController = TextEditingController();
   final ImagePicker _picker = ImagePicker();
 
   // State Foto Bukti Masalah (disimpan di memory sementara & otomatis ter-lock)
   Uint8List? _selectedImageBytes;
   bool _isPhotoLocked = false;
+
+  // State Kategori Kerusakan (8 Kategori - Icon bisa kamu sesuaikan di sini)
+  final List<Map<String, dynamic>> _allCategories = [
+    {'name': 'Kelistrikan', 'icon': Icons.electrical_services_rounded},
+    {'name': 'Air', 'icon': Icons.water_drop_rounded},
+    {'name': 'Atap & Dinding', 'icon': Icons.roofing_rounded},
+    {'name': 'Kunci & Pintu', 'icon': Icons.vpn_key_rounded},
+    {'name': 'Teknologi', 'icon': Icons.devices_rounded},
+    {'name': 'Kendaraan', 'icon': Icons.directions_car_rounded},
+    {'name': 'Angkut Barang', 'icon': Icons.local_shipping_rounded},
+    {'name': 'Bantuan Lainnya', 'icon': Icons.handyman_rounded},
+  ];
+
+  // Menyimpan daftar nama kategori yang sedang dipilih
+  final List<String> _selectedCategories = [];
 
   // State Lokasi GPS
   bool _isLoadingLocation = false;
@@ -53,6 +70,8 @@ class _TawaranSayaState extends State<TawaranSaya> {
 
   @override
   void dispose() {
+    _judulController.dispose();
+    _detailController.dispose();
     _alamatController.dispose();
     super.dispose();
   }
@@ -141,7 +160,7 @@ class _TawaranSayaState extends State<TawaranSaya> {
                   leading: Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xff006747).withOpacity(0.1),
+                      color: const Color(0xff006747).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Icon(
@@ -167,7 +186,7 @@ class _TawaranSayaState extends State<TawaranSaya> {
                   leading: Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xff006747).withOpacity(0.1),
+                      color: const Color(0xff006747).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: const Icon(
@@ -196,7 +215,189 @@ class _TawaranSayaState extends State<TawaranSaya> {
     );
   }
 
-  // 2. Fungsi Deteksi Lokasi dengan Geolocator + OpenStreetMap HTTP (Bebas Error Geocoding!)
+  // 2. Pop-up Pilih Kategori Kerusakan
+  Future<void> _showCategoryPopup() async {
+    await showDialog(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              backgroundColor: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xff006a49)
+                                .withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: const Icon(
+                            Icons.category_rounded,
+                            color: Color(0xff006a49),
+                            size: 24,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Pilih Kategori Kerusakan",
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  fontSize: 15,
+                                  color: Color(0xff1e2621),
+                                ),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                "Ketuk untuk menambah atau membatalkan pilihan",
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: Color(0xff717e76),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        child: Column(
+                          children: _allCategories.map((cat) {
+                            final String name = cat['name'];
+                            final IconData icon = cat['icon'];
+                            final bool isSelected = _selectedCategories
+                                .contains(name);
+
+                            return GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  if (isSelected) {
+                                    _selectedCategories.remove(name);
+                                  } else {
+                                    _selectedCategories.add(name);
+                                  }
+                                });
+                                setModalState(() {});
+                              },
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 160),
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: isSelected
+                                      ? const Color(0xffd4f5e9)
+                                      : const Color(0xfff8f9ff),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: isSelected
+                                        ? const Color(0xff006747)
+                                        : const Color(0xffe0e4ec),
+                                    width: isSelected ? 1.5 : 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: isSelected
+                                            ? const Color(0xff006747)
+                                            : Colors.white,
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      child: Icon(
+                                        icon,
+                                        size: 18,
+                                        color: isSelected
+                                            ? Colors.white
+                                            : const Color(0xff006747),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        name,
+                                        style: TextStyle(
+                                          fontWeight: isSelected
+                                              ? FontWeight.w700
+                                              : FontWeight.w600,
+                                          fontSize: 13,
+                                          color: isSelected
+                                              ? const Color(0xff006747)
+                                              : const Color(0xff1e2621),
+                                        ),
+                                      ),
+                                    ),
+                                    Icon(
+                                      isSelected
+                                          ? Icons.check_circle_rounded
+                                          : Icons.add_circle_outline_rounded,
+                                      color: isSelected
+                                          ? const Color(0xff006747)
+                                          : const Color(0xff9aa59e),
+                                      size: 20,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(ctx),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xff006747),
+                          elevation: 0,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          "Selesai",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // 3. Fungsi Deteksi Lokasi dengan Geolocator + OpenStreetMap HTTP (Bebas Error Geocoding!)
   Future<void> _getLocationAndFillAddress() async {
     setState(() => _isLoadingLocation = true);
 
@@ -267,7 +468,7 @@ class _TawaranSayaState extends State<TawaranSaya> {
     }
   }
 
-  // 3. Pop-up Input Imbalan Custom (Style persis DetailTawaran)
+  // 4. Pop-up Input Imbalan Custom (Style persis DetailTawaran)
   Future<void> _showCustomWageModal() async {
     final TextEditingController customCtrl = TextEditingController(
       text: _customWageAmount != null
@@ -297,7 +498,8 @@ class _TawaranSayaState extends State<TawaranSaya> {
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xff006a49).withOpacity(0.12),
+                            color: const Color(0xff006a49)
+                                .withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: const Icon(
@@ -591,8 +793,8 @@ class _TawaranSayaState extends State<TawaranSaya> {
                                               horizontal: 8,
                                             ),
                                             decoration: BoxDecoration(
-                                              color: Colors.black.withOpacity(
-                                                0.65,
+                                              color: Colors.black.withValues(
+                                                alpha: 0.65,
                                               ),
                                               borderRadius:
                                                   BorderRadius.circular(20),
@@ -699,6 +901,265 @@ class _TawaranSayaState extends State<TawaranSaya> {
                                   ),
                                 ],
                               ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // CARD BARU: Informasi & Kategori Kerusakan
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 10),
+                      width: MediaQuery.of(context).size.width,
+                      decoration: BoxDecoration(
+                        color: const Color(0xffffffff),
+                        borderRadius: BorderRadius.circular(10.0),
+                      ),
+                      child: Padding(
+                        padding: const EdgeInsets.all(10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              "Informasi Kerusakan",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                                color: Color(0xff000000),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+
+                            // Input Judul Kerusakan
+                            const Text(
+                              "Judul Kerusakan",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                                color: Color(0xff000000),
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            TextField(
+                              controller: _judulController,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w400,
+                                fontSize: 13,
+                                color: Color(0xff000000),
+                              ),
+                              decoration: InputDecoration(
+                                disabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10.0),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xff3d4a42),
+                                    width: 1,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10.0),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xff006747),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10.0),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xff3d4a42),
+                                    width: 1,
+                                  ),
+                                ),
+                                hintText: "Contoh: Pipa wastafel bocor / Saklar lampu korslet...",
+                                hintStyle: const TextStyle(
+                                  fontWeight: FontWeight.w400,
+                                  fontSize: 13,
+                                  color: Color(0xffa4a4a4),
+                                ),
+                                filled: true,
+                                fillColor: const Color(0xfff2f3ff),
+                                contentPadding: const EdgeInsets.symmetric(
+                                  horizontal: 12,
+                                  vertical: 11,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+
+                            // Input Detail Kerusakan
+                            const Text(
+                              "Detail Kerusakan",
+                              style: TextStyle(
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                                color: Color(0xff000000),
+                              ),
+                            ),
+                            const SizedBox(height: 5),
+                            TextField(
+                              controller: _detailController,
+                              maxLines: 3,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w400,
+                                fontSize: 13,
+                                color: Color(0xff000000),
+                              ),
+                              decoration: InputDecoration(
+                                disabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10.0),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xff3d4a42),
+                                    width: 1,
+                                  ),
+                                ),
+                                focusedBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10.0),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xff006747),
+                                    width: 1.5,
+                                  ),
+                                ),
+                                enabledBorder: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(10.0),
+                                  borderSide: const BorderSide(
+                                    color: Color(0xff3d4a42),
+                                    width: 1,
+                                  ),
+                                ),
+                                hintText: "Jelaskan kronologi atau kondisi detail kerusakan agar tukang paham situasi...",
+                                hintStyle: const TextStyle(
+                                  fontWeight: FontWeight.w400,
+                                  fontSize: 13,
+                                  color: Color(0xffa4a4a4),
+                                ),
+                                filled: true,
+                                fillColor: const Color(0xfff2f3ff),
+                                contentPadding: const EdgeInsets.all(12),
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+
+                            // Bagian Kategori Kerusakan
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                const Text(
+                                  "Kategori Kerusakan",
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w600,
+                                    fontSize: 12,
+                                    color: Color(0xff000000),
+                                  ),
+                                ),
+                                if (_selectedCategories.isNotEmpty)
+                                  const Text(
+                                    "Ketuk kategori untuk menghapus",
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                      fontSize: 10,
+                                      color: Color(0xff717e76),
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                // Menampilkan kategori yang sudah dipilih (jika dipencet lagi maka akan hilang)
+                                ..._selectedCategories.map((catName) {
+                                  final catData = _allCategories.firstWhere(
+                                    (element) => element['name'] == catName,
+                                    orElse: () => {
+                                      'name': catName,
+                                      'icon': Icons.build_rounded,
+                                    },
+                                  );
+
+                                  return GestureDetector(
+                                    onTap: () {
+                                      setState(() {
+                                        _selectedCategories.remove(catName);
+                                      });
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 12,
+                                        vertical: 7,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xff006747),
+                                        borderRadius: BorderRadius.circular(
+                                          20.0,
+                                        ),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(
+                                            catData['icon'] as IconData,
+                                            size: 14,
+                                            color: Colors.white,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            catName,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w600,
+                                              fontSize: 11,
+                                              color: Colors.white,
+                                            ),
+                                          ),
+                                          const SizedBox(width: 5),
+                                          const Icon(
+                                            Icons.close_rounded,
+                                            size: 13,
+                                            color: Color(0xffd4f5e9),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                }),
+
+                                // Tombol "+ Tambahkan Kategori" untuk memunculkan Pop-up
+                                GestureDetector(
+                                  onTap: _showCategoryPopup,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 12,
+                                      vertical: 7,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xffeaedff),
+                                      borderRadius: BorderRadius.circular(20.0),
+                                      border: Border.all(
+                                        color: const Color(0xff006747),
+                                        width: 1,
+                                      ),
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.add_rounded,
+                                          size: 15,
+                                          color: Color(0xff006747),
+                                        ),
+                                        SizedBox(width: 4),
+                                        Text(
+                                          "Tambahkan Kategori",
+                                          style: TextStyle(
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 11,
+                                            color: Color(0xff006747),
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),
@@ -931,7 +1392,9 @@ class _TawaranSayaState extends State<TawaranSaya> {
                                             _isSosActive = value;
                                           });
                                         },
-                                        activeColor: const Color(0xffffffff),
+                                        activeThumbColor: const Color(
+                                          0xffffffff,
+                                        ),
                                         activeTrackColor: const Color(
                                           0xffba0011,
                                         ),
@@ -1256,6 +1719,39 @@ class _TawaranSayaState extends State<TawaranSaya> {
                             );
                             return;
                           }
+                          if (_judulController.text.trim().isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Mohon isi Judul Kerusakan terlebih dahulu!',
+                                ),
+                                backgroundColor: Colors.redAccent,
+                              ),
+                            );
+                            return;
+                          }
+                          if (_detailController.text.trim().isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Mohon isi Detail Kerusakan terlebih dahulu!',
+                                ),
+                                backgroundColor: Colors.redAccent,
+                              ),
+                            );
+                            return;
+                          }
+                          if (_selectedCategories.isEmpty) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text(
+                                  'Mohon pilih minimal 1 Kategori Kerusakan!',
+                                ),
+                                backgroundColor: Colors.redAccent,
+                              ),
+                            );
+                            return;
+                          }
                           if (_alamatController.text.trim().isEmpty) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(
@@ -1271,7 +1767,7 @@ class _TawaranSayaState extends State<TawaranSaya> {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(
-                                'Permintaan dikirim dengan total ${_formatRupiah(totalEstimation)}!',
+                                'Permintaan "${_judulController.text.trim()}" dikirim dengan total ${_formatRupiah(totalEstimation)}!',
                               ),
                               backgroundColor: const Color(0xff006747),
                             ),
