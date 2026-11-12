@@ -1,4 +1,5 @@
 import 'package:bantukilat/page/DetailTawaran.dart';
+import 'package:bantukilat/page/teknisi/ListTawaranPage.dart';
 import 'package:bantukilat/page/teknisi/TugasSaya.dart';
 import 'package:flutter/material.dart';
 
@@ -190,7 +191,10 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                 ),
               ),
               InkWell(
-                onTap: () => Navigator.pop(context),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => ListTawaranPage()),
+                ),
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   width: MediaQuery.of(context).size.width,
@@ -1001,7 +1005,14 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                   child: Align(
                     alignment: Alignment.center,
                     child: MaterialButton(
-                      onPressed: () {},
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => ListTawaranPage(),
+                          ),
+                        );
+                      },
                       color: const Color(0xff006646),
                       elevation: 2,
                       shape: RoundedRectangleBorder(
