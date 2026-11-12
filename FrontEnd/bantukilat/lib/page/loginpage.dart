@@ -1,8 +1,8 @@
-import 'package:bantukilat/page/HomePageTeknisi.dart';
-import 'package:bantukilat/page/RegisterTeknisi.dart';
+import 'package:bantukilat/page/teknisi/HomePageTeknisi.dart';
+import 'package:bantukilat/page/teknisi/RegisterTeknisi.dart';
 import 'package:bantukilat/page/forgotpassword.dart';
-import 'package:bantukilat/page/homepageuser.dart';
 import 'package:bantukilat/page/registerpage.dart';
+import 'package:bantukilat/page/user/HomePageUser.dart';
 import 'package:flutter/material.dart';
 
 class LoginPage extends StatefulWidget {

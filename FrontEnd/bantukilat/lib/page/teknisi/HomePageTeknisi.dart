@@ -1,4 +1,5 @@
 import 'package:bantukilat/page/DetailTawaran.dart';
+import 'package:bantukilat/page/teknisi/TugasSaya.dart';
 import 'package:flutter/material.dart';
 
 class HomePageTeknisi extends StatefulWidget {
@@ -19,14 +20,8 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
   int _emergencySlideIndex = 0;
 
   final List<Map<String, dynamic>> _emergencySlides = [
-    {
-      "image": "assets/images/dummy.png",
-      "label": "Foto Kerusakan",
-    },
-    {
-      "image": "assets/images/dummy.png",
-      "label": "Lokasi Peta",
-    },
+    {"image": "assets/images/dummy.png", "label": "Foto Kerusakan"},
+    {"image": "assets/images/dummy.png", "label": "Lokasi Peta"},
   ];
 
   // 3. Data Dummy Tawaran Sekitar (Dinamis, bisa ditolak/dihapus, tampil maks 3)
@@ -39,8 +34,7 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
       "warnaContainerTipe": const Color(0xffffddb8),
       "warnaTextTipe": const Color(0xff2c1800),
       "judulKerusakan": "Stopkontak bau gosong",
-      "deskripsiKerusakan":
-          "Perlu dicek sekring utama, kabel jalur ruang tamu bau menyengat dan sempat keluar percikan api.",
+      "deskripsiKerusakan": "Perlu dicek sekring utama, kabel jalur ruang tamu bau menyengat dan sempat keluar percikan api.",
       "alamat": "Jl. Kalijudan Barat III No. 12, Surabaya",
       "upah": "Rp 35.000",
       "upahInt": 35000,
@@ -53,8 +47,7 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
       "warnaContainerTipe": const Color(0xffd0e8ff),
       "warnaTextTipe": const Color(0xff003366),
       "judulKerusakan": "Wastafel Dapur Mampet",
-      "deskripsiKerusakan":
-          "Air pembuangan cucian piring tidak mau turun sama sekali sejak tadi pagi.",
+      "deskripsiKerusakan": "Air pembuangan cucian piring tidak mau turun sama sekali sejak tadi pagi.",
       "alamat": "Jl. Mulyorejo Tengah No. 45, Surabaya",
       "upah": "Rp 40.000",
       "upahInt": 40000,
@@ -67,8 +60,7 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
       "warnaContainerTipe": const Color(0xffe2d4ff),
       "warnaTextTipe": const Color(0xff3a0066),
       "judulKerusakan": "Engsel Pintu Pagar Lepas",
-      "deskripsiKerusakan":
-          "Las engsel bawah pagar besi patah, pintu pagar miring tidak bisa ditutup.",
+      "deskripsiKerusakan": "Las engsel bawah pagar besi patah, pintu pagar miring tidak bisa ditutup.",
       "alamat": "Jl. Pacar Kembang II No. 8, Surabaya",
       "upah": "Rp 50.000",
       "upahInt": 50000,
@@ -223,7 +215,10 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                 ),
               ),
               InkWell(
-                onTap: () => Navigator.pop(context),
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => TugasSaya()),
+                ),
                 child: Container(
                   margin: const EdgeInsets.symmetric(vertical: 15),
                   padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -317,8 +312,9 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
   @override
   Widget build(BuildContext context) {
     // Ambil maksimal 3 tawaran yang ditampilkan di halaman utama
-    final List<Map<String, dynamic>> displayedOffers =
-        _daftarTawaranSekitar.take(3).toList();
+    final List<Map<String, dynamic>> displayedOffers = _daftarTawaranSekitar
+        .take(3)
+        .toList();
     final int waitingCount = displayedOffers.length;
 
     return Scaffold(
@@ -375,8 +371,10 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                               borderRadius: BorderRadius.circular(15.0),
                               border: Border.all(
                                 color: isSiagaAktif
-                                    ? const Color(0xff006848).withValues(alpha: 0.3)
-                                    : const Color(0xffba0011).withValues(alpha: 0.4),
+                                    ? const Color(0xff006848)
+                                          .withValues(alpha: 0.3)
+                                    : const Color(0xffba0011)
+                                          .withValues(alpha: 0.4),
                               ),
                             ),
                             child: Row(
@@ -615,9 +613,9 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                                           Image.asset(
                                             _emergencySlides[index]["image"]!,
                                             height: 130,
-                                            width: MediaQuery.of(
-                                              context,
-                                            ).size.width,
+                                            width: MediaQuery.of(context)
+                                                .size
+                                                .width,
                                             fit: BoxFit.cover,
                                             errorBuilder:
                                                 (context, error, stackTrace) {
@@ -657,8 +655,7 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                                                   ),
                                                   const SizedBox(width: 4),
                                                   Text(
-                                                    _emergencySlides[index]
-                                                        ["label"]!,
+                                                    _emergencySlides[index]["label"]!,
                                                     style: const TextStyle(
                                                       color: Colors.white,
                                                       fontSize: 9,
@@ -820,17 +817,14 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                                           MaterialPageRoute(
                                             builder: (context) =>
                                                 const DetailTawaran(
-                                                  title:
-                                                      "Kran Pipa Jebol & Air Meluap",
+                                                  title: "Kran Pipa Jebol & Air Meluap",
                                                   customerName: "Ibu Ratna",
                                                   previewImage:
                                                       "assets/images/dummy.png",
-                                                  description:
-                                                      "Kran patah di drat tembok, air meluap ke kamar tidur! Butuh bantuan segera sebelum banjir ke kasur.",
+                                                  description: "Kran patah di drat tembok, air meluap ke kamar tidur! Butuh bantuan segera sebelum banjir ke kasur.",
                                                   mapImage:
                                                       "assets/images/dummy.png",
-                                                  addressDetail:
-                                                      "RT 02 No. 14, Depan Pos Ronda",
+                                                  addressDetail: "RT 02 No. 14, Depan Pos Ronda",
                                                   initialWage: 55000,
                                                 ),
                                           ),
