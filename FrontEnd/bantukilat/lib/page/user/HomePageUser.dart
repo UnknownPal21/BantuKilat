@@ -1,5 +1,11 @@
+import 'dart:async';
+
+import 'package:bantukilat/page/user/ListMyTawaran.dart';
 import 'package:bantukilat/page/user/TawaranSaya.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:latlong2/latlong.dart';
 
 class HomePageUser extends StatefulWidget {
   const HomePageUser({super.key});
@@ -10,6 +16,83 @@ class HomePageUser extends StatefulWidget {
 
 class _HomePageUserState extends State<HomePageUser> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+
+  // Controller & State untuk Live Tracking Maps
+  final MapController _mapController = MapController();
+  StreamSubscription<Position>? _positionStream;
+  LatLng _currentLocation = const LatLng(
+    -7.2575,
+    112.7521,
+  ); // Default awal sebelum GPS mengunci
+  bool _isLoadingLocation = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _initLocationTracking();
+  }
+
+  @override
+  void dispose() {
+    _positionStream?.cancel();
+    _mapController.dispose();
+    super.dispose();
+  }
+
+  // Fungsi untuk meminta izin GPS dan melacak posisi pengguna secara otomatis
+  Future<void> _initLocationTracking() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted) setState(() => _isLoadingLocation = false);
+      return;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) {
+        if (mounted) setState(() => _isLoadingLocation = false);
+        return;
+      }
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) setState(() => _isLoadingLocation = false);
+      return;
+    }
+
+    // Ambil lokasi saat ini pertama kali
+    try {
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      if (mounted) {
+        setState(() {
+          _currentLocation = LatLng(position.latitude, position.longitude);
+          _isLoadingLocation = false;
+        });
+        _mapController.move(_currentLocation, 16.0);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingLocation = false);
+    }
+
+    // Lacak pergerakan lokasi secara real-time (update setiap bergeser 5 meter)
+    _positionStream =
+        Geolocator.getPositionStream(
+          locationSettings: const LocationSettings(
+            accuracy: LocationAccuracy.high,
+            distanceFilter: 5,
+          ),
+        ).listen((Position position) {
+          if (mounted) {
+            setState(() {
+              _currentLocation = LatLng(position.latitude, position.longitude);
+            });
+            _mapController.move(_currentLocation, _mapController.camera.zoom);
+          }
+        });
+  }
 
   // Widget Sidebar (Overlay Drawer)
   Widget _buildSidebar(BuildContext context) {
@@ -130,7 +213,7 @@ class _HomePageUserState extends State<HomePageUser> {
                 onTap: () {
                   Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (context) => TawaranSaya()),
+                    MaterialPageRoute(builder: (context) => ListMyTawaran()),
                   );
                 },
                 child: Container(
@@ -412,20 +495,131 @@ class _HomePageUserState extends State<HomePageUser> {
                   ),
                 ),
 
-                // BANNER GAMBAR
-                Image.asset(
-                  "assets/images/dummy.png",
+                // BANNER MAPS LIVE TRACKING (Menggantikan dummy.png)
+                SizedBox(
                   height: 200,
                   width: MediaQuery.of(context).size.width,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      height: 200,
-                      width: MediaQuery.of(context).size.width,
-                      color: Colors.grey[300],
-                      child: const Icon(Icons.broken_image, color: Colors.grey),
-                    );
-                  },
+                  child: Stack(
+                    children: [
+                      FlutterMap(
+                        mapController: _mapController,
+                        options: MapOptions(
+                          initialCenter: _currentLocation,
+                          initialZoom: 16.0,
+                        ),
+                        children: [
+                          TileLayer(
+                            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                            userAgentPackageName: 'com.example.bantukilat',
+                          ),
+                          MarkerLayer(
+                            markers: [
+                              Marker(
+                                point: _currentLocation,
+                                width: 50,
+                                height: 50,
+                                child: Stack(
+                                  alignment: Alignment.center,
+                                  children: [
+                                    Container(
+                                      width: 36,
+                                      height: 36,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xff006a49)
+                                            .withOpacity(0.25),
+                                        shape: BoxShape.circle,
+                                      ),
+                                    ),
+                                    Container(
+                                      width: 16,
+                                      height: 16,
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xff006a49),
+                                        shape: BoxShape.circle,
+                                        border: Border.all(
+                                          color: Colors.white,
+                                          width: 2.5,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+
+                      // Indikator saat sedang mencari titik GPS
+                      if (_isLoadingLocation)
+                        Positioned(
+                          top: 10,
+                          left: 10,
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 6,
+                            ),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withOpacity(0.9),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                SizedBox(
+                                  width: 12,
+                                  height: 12,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Color(0xff006a49),
+                                  ),
+                                ),
+                                SizedBox(width: 6),
+                                Text(
+                                  "Mencari lokasi...",
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w600,
+                                    color: Color(0xff006a49),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                      // Tombol fokus ulang ke lokasi saya (Pojok Kanan Bawah Peta)
+                      Positioned(
+                        bottom: 10,
+                        right: 10,
+                        child: InkWell(
+                          onTap: () {
+                            _mapController.move(_currentLocation, 16.0);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black26,
+                                  blurRadius: 4,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: const Icon(
+                              Icons.my_location,
+                              color: Color(0xff006a49),
+                              size: 20,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
 
                 const Padding(
