@@ -11,8 +11,10 @@ from backend.core.errors import (
 )
 from backend.db.mongo import client, close_client
 from backend.routers.auth import router as auth_router
+from backend.routers.ai import router as ai_router
 from backend.routers.bids import router as bids_router
 from backend.routers.categories import router as categories_router
+from backend.routers.media import router as media_router
 from backend.routers.offers import router as offers_router
 
 
@@ -28,8 +30,10 @@ app.add_exception_handler(ApiError, api_error_handler)
 app.add_exception_handler(RequestValidationError, validation_error_handler)
 
 app.include_router(auth_router)
+app.include_router(ai_router)
 app.include_router(bids_router)
 app.include_router(categories_router)
+app.include_router(media_router)
 app.include_router(offers_router)
 
 

@@ -8,10 +8,15 @@ from backend.core.errors import ApiError
 from backend.core.timeutils import iso_utc, utcnow
 from backend.db.mongo import db
 from backend.models.offer import OfferCreateIn, OfferStatus
+from backend.services import ai_client, media_service, price_service
 
 # Server yang menentukan fee, bukan client (spec §4 aturan bisnis).
 SOS_FEE = 10_000
 OFFER_TTL_MINUTES = 30
+
+# Di bawah ini bukan harga jasa wajar; jangan kotori katalog dengan nominal
+# uji coba.
+MIN_DEAL_FOR_SAMPLE = 5_000
 
 # Radar teknisi hanya menampilkan offer yang masih bisa ditawar.
 NEARBY_STATUSES: list[OfferStatus] = ["WAITING", "NEGOTIATING"]
@@ -45,7 +50,14 @@ def _offer_response(doc: dict) -> dict:
         "category_snapshot": doc.get("category_snapshot") or {},
         "title": doc["title"],
         "description": doc["description"],
-        "photos": doc.get("photos") or [],
+        "photos": [
+            # Hanya id media yang bisa dijadikan URL. Data lama berupa path
+            # atau data URI base64 dibuang: mengembalikannya utuh bisa
+            # membuat satu response berukuran megabyte.
+            media_service.public_url(p)
+            for p in doc.get("photos") or []
+            if media_service.is_media_id(p)
+        ],
         "location": doc["location"],
         "address_text": doc.get("address_text", ""),
         "geo_index": doc.get("geo_index"),
@@ -76,6 +88,9 @@ async def create(user: dict, payload: OfferCreateIn) -> dict:
             422, "CATEGORY_NOT_FOUND", "Kategori tidak ditemukan atau tidak aktif"
         )
 
+    # Setiap id harus ada di collection media dan milik user ini.
+    photos = await media_service.require_owned_photos(user, payload.photos)
+
     now = utcnow()
     address = user.get("address") or {}
 
@@ -97,7 +112,7 @@ async def create(user: dict, payload: OfferCreateIn) -> dict:
         },
         "title": payload.title,
         "description": payload.description,
-        "photos": payload.photos,
+        "photos": photos,
         # GeoJSON selalu [lng, lat] — bukan [lat, lng].
         "location": {"type": "Point", "coordinates": [payload.lng, payload.lat]},
         "address_text": payload.address_text,
@@ -126,6 +141,8 @@ async def create(user: dict, payload: OfferCreateIn) -> dict:
 
     result = await db.offers.insert_one(doc)
     doc["_id"] = result.inserted_id
+    # Baru setelah offer benar-benar tersimpan, foto ditandai terpakai.
+    await media_service.mark_used(photos)
     return _offer_response(doc)
 
 
@@ -176,7 +193,32 @@ async def complete(user: dict, offer_id: str) -> dict:
         {"_id": user["_id"]}, {"$inc": {"tech.completed_count": 1}}
     )
 
+    # Harga deal ikut memperkaya katalog: AI yang sama akan memakai data ini
+    # pada percakapan berikutnya, tanpa ada penulisan manual.
+    await _record_deal_sample(updated)
+
     return _offer_response(updated)
+
+
+async def _record_deal_sample(offer: dict) -> None:
+    price = offer.get("agreed_price")
+    code = (offer.get("category_snapshot") or {}).get("code")
+    if not price or not code or int(price) < MIN_DEAL_FOR_SAMPLE:
+        return
+
+    # Offer tidak menyimpan severity (AI memang tidak mengisi form), jadi
+    # keparahan diturunkan dari teksnya. Kalau meleset, dampaknya hanya
+    # distribusi harga yang sedikit bergeser, bukan data offer yang berubah.
+    severity = ai_client.guess_severity(
+        f"{offer.get('title', '')} {offer.get('description', '')}"
+    )
+    city = (offer.get("geo_index") or {}).get("city")
+
+    recorded = await price_service.record_sample(
+        code, severity, city, int(price), "DEAL", offer["_id"]
+    )
+    if recorded:
+        await price_service.refresh(code, severity)
 
 
 async def nearby(

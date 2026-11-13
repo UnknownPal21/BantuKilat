@@ -204,14 +204,60 @@ async def ensure_bids() -> None:
     await db.bids.create_index([("technician_id", 1), ("created_at", -1)])
 
 
+async def ensure_media() -> None:
+    # Lookup saat offer/chat dibuat selalu lewat _id, jadi index utama tidak
+    # diperlukan. Dua index ini untuk daftar foto user dan pembersihan file
+    # yatim (used_at masih null).
+    await db.media.create_index([("owner_id", 1), ("created_at", -1)])
+    await db.media.create_index([("used_at", 1), ("created_at", 1)])
+
+
+async def ensure_prices() -> None:
+    await db.price_samples.create_index(
+        [("category_code", 1), ("severity", 1), ("city", 1)]
+    )
+    await db.price_samples.create_index([("source", 1), ("created_at", 1)])
+    # Satu offer hanya boleh menyumbang satu sampel harga, sekalipun endpoint
+    # complete dipanggil dua kali.
+    await db.price_samples.create_index(
+        "offer_id",
+        unique=True,
+        partialFilterExpression={"source": "DEAL"},
+    )
+    # city: null ikut tersimpan, jadi index ini sekaligus jadi kunci unik
+    # baris nasional.
+    await db.price_catalog.create_index(
+        [("category_code", 1), ("severity", 1), ("city", 1)], unique=True
+    )
+
+
+async def ensure_ai() -> None:
+    await db.ai_conversations.create_index([("user_id", 1), ("updated_at", -1)])
+    await db.ai_conversations.create_index(
+        [("user_id", 1), ("status", 1), ("last_message_at", -1)]
+    )
+    await db.ai_messages.create_index([("conversation_id", 1), ("created_at", 1)])
+    await db.ai_messages.create_index([("user_id", 1), ("created_at", -1)])
+    # Dipakai menghitung kuota harian: role USER per user per hari.
+    await db.ai_messages.create_index(
+        [("user_id", 1), ("role", 1), ("created_at", -1)]
+    )
+
+
 async def setup() -> None:
     await ensure_user_indexes()
     await ensure_categories()
     await ensure_offers()
     await ensure_bids()
+    await ensure_media()
+    await ensure_prices()
+    await ensure_ai()
     print("categories:", await db.categories.count_documents({}))
     print("offers index:", await db.offers.index_information())
     print("bids index:", await db.bids.index_information())
+    print("media index:", await db.media.index_information())
+    print("price samples:", await db.price_samples.count_documents({}))
+    print("price catalog:", await db.price_catalog.count_documents({}))
 
 
 if __name__ == "__main__":

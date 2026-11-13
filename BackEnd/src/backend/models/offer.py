@@ -1,3 +1,4 @@
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -10,6 +11,9 @@ OfferStatus = Literal[
     "CANCELLED",
     "EXPIRED",
 ]
+
+# photos berisi id media hasil POST /media, bukan path atau data URI.
+_MEDIA_ID = re.compile(r"^[0-9a-fA-F]{24}$")
 
 
 class OfferCreateIn(BaseModel):
@@ -36,10 +40,23 @@ class OfferCreateIn(BaseModel):
     @field_validator("photos")
     @classmethod
     def clean_photos(cls, v: list[str]) -> list[str]:
-        # Buang string kosong: photos: ["", "a.jpg"] tidak boleh lolos.
-        cleaned = [p.strip() for p in v if p.strip()]
+        cleaned: list[str] = []
+        for raw in v:
+            p = raw.strip()
+            if not p:
+                continue
+            # Jaring terakhir kalau Flutter mengirim data URI langsung ke
+            # endpoint ini: tolak, jangan simpan string megabyte di Mongo.
+            if p.startswith("data:") or len(p) > 300:
+                raise ValueError("Foto harus diunggah lewat POST /media")
+            if not _MEDIA_ID.fullmatch(p):
+                raise ValueError("ID foto tidak valid")
+            cleaned.append(p.lower())
+
         if not cleaned:
             raise ValueError("Minimal satu foto")
+        if len(set(cleaned)) != len(cleaned):
+            raise ValueError("Foto tidak boleh duplikat")
         return cleaned
 
 
