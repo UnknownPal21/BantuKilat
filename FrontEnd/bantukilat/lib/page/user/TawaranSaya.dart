@@ -3,9 +3,11 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:latlong2/latlong.dart';
 
 class TawaranSaya extends StatefulWidget {
   const TawaranSaya({super.key});
@@ -19,6 +21,7 @@ class _TawaranSayaState extends State<TawaranSaya> {
   final TextEditingController _detailController = TextEditingController();
   final TextEditingController _alamatController = TextEditingController();
   final ImagePicker _picker = ImagePicker();
+  final MapController _mapController = MapController();
 
   // State Foto Bukti Masalah (disimpan di memory sementara & otomatis ter-lock)
   Uint8List? _selectedImageBytes;
@@ -73,6 +76,7 @@ class _TawaranSayaState extends State<TawaranSaya> {
     _judulController.dispose();
     _detailController.dispose();
     _alamatController.dispose();
+    _mapController.dispose();
     super.dispose();
   }
 
@@ -423,8 +427,22 @@ class _TawaranSayaState extends State<TawaranSaya> {
         desiredAccuracy: LocationAccuracy.high,
       );
 
-      _currentLat = position.latitude;
-      _currentLng = position.longitude;
+      if (mounted) {
+        setState(() {
+          _currentLat = position.latitude;
+          _currentLng = position.longitude;
+        });
+
+        // Pindahkan kamera peta begitu koordinat berhasil didapatkan
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          try {
+            _mapController.move(
+              LatLng(position.latitude, position.longitude),
+              16.0,
+            );
+          } catch (_) {}
+        });
+      }
 
       final url = Uri.parse(
         'https://nominatim.openstreetmap.org/reverse?format=json&lat=${position.latitude}&lon=${position.longitude}&zoom=18&addressdetails=1',
@@ -1193,11 +1211,145 @@ class _TawaranSayaState extends State<TawaranSaya> {
                               padding: const EdgeInsets.only(top: 10),
                               child: ClipRRect(
                                 borderRadius: BorderRadius.circular(8.0),
-                                child: Image.asset(
-                                  "assets/images/dummy.png",
+                                child: SizedBox(
                                   height: 180,
                                   width: MediaQuery.of(context).size.width,
-                                  fit: BoxFit.cover,
+                                  child: Stack(
+                                    children: [
+                                      FlutterMap(
+                                        mapController: _mapController,
+                                        options: MapOptions(
+                                          initialCenter: LatLng(
+                                            _currentLat ?? -7.2575,
+                                            _currentLng ?? 112.7521,
+                                          ),
+                                          initialZoom: 15.0,
+                                        ),
+                                        children: [
+                                          TileLayer(
+                                            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                            userAgentPackageName:
+                                                'com.example.bantukilat',
+                                          ),
+                                          if (_currentLat != null &&
+                                              _currentLng != null)
+                                            MarkerLayer(
+                                              markers: [
+                                                Marker(
+                                                  point: LatLng(
+                                                    _currentLat!,
+                                                    _currentLng!,
+                                                  ),
+                                                  width: 50,
+                                                  height: 50,
+                                                  child: Stack(
+                                                    alignment: Alignment.center,
+                                                    children: [
+                                                      Container(
+                                                        width: 36,
+                                                        height: 36,
+                                                        decoration:
+                                                            BoxDecoration(
+                                                              color:
+                                                                  const Color(
+                                                                    0xff006747,
+                                                                  ).withValues(
+                                                                    alpha: 0.25,
+                                                                  ),
+                                                              shape: BoxShape
+                                                                  .circle,
+                                                            ),
+                                                      ),
+                                                      Container(
+                                                        width: 16,
+                                                        height: 16,
+                                                        decoration:
+                                                            BoxDecoration(
+                                                              color:
+                                                                  const Color(
+                                                                    0xff006747,
+                                                                  ),
+                                                              shape: BoxShape
+                                                                  .circle,
+                                                              border: Border.all(
+                                                                color: Colors
+                                                                    .white,
+                                                                width: 2.5,
+                                                              ),
+                                                            ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                        ],
+                                      ),
+                                      if (_currentLat == null ||
+                                          _currentLng == null)
+                                        Positioned(
+                                          top: 8,
+                                          left: 8,
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 5,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white.withValues(
+                                                alpha: 0.9,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(15),
+                                            ),
+                                            child: const Text(
+                                              "Klik tombol di bawah untuk deteksi lokasi",
+                                              style: TextStyle(
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.w600,
+                                                color: Color(0xff006747),
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      if (_currentLat != null &&
+                                          _currentLng != null)
+                                        Positioned(
+                                          bottom: 8,
+                                          right: 8,
+                                          child: InkWell(
+                                            onTap: () {
+                                              _mapController.move(
+                                                LatLng(
+                                                  _currentLat!,
+                                                  _currentLng!,
+                                                ),
+                                                16.0,
+                                              );
+                                            },
+                                            child: Container(
+                                              padding: const EdgeInsets.all(7),
+                                              decoration: const BoxDecoration(
+                                                color: Colors.white,
+                                                shape: BoxShape.circle,
+                                                boxShadow: [
+                                                  BoxShadow(
+                                                    color: Colors.black26,
+                                                    blurRadius: 4,
+                                                    offset: Offset(0, 2),
+                                                  ),
+                                                ],
+                                              ),
+                                              child: const Icon(
+                                                Icons.my_location,
+                                                color: Color(0xff006747),
+                                                size: 18,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
