@@ -71,6 +71,8 @@ class OfferOut(BaseModel):
     created_at: str
     updated_at: str
     expires_at: str
+    assigned_at: str | None = None
+    completed_at: str | None = None
 
     # Hanya terisi pada GET /offers/nearby ($geoNear).
     distance_m: int | None = None

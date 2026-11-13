@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, Query, status
 
-from backend.core.deps import get_current_user
+from backend.core.deps import get_current_user, require_role
+from backend.models.bid import BidCreateIn, BidOut, BidStatus
 from backend.models.offer import OfferCreateIn, OfferOut, OfferStatus
-from backend.services import offer_service
+from backend.services import bid_service, offer_service
 
 router = APIRouter(prefix="/offers", tags=["offers"])
 
@@ -40,3 +41,46 @@ async def my_offers(
 ) -> list[OfferOut]:
     data_response = await offer_service.mine(user, status_filter, limit)
     return [OfferOut(**item) for item in data_response]
+
+
+# Route dinamis wajib di bawah /nearby dan /mine, kalau tidak "nearby"
+# akan dibaca sebagai offer_id.
+@router.get("/{offer_id}", response_model=OfferOut)
+async def get_offer(
+    offer_id: str,
+    user: dict = Depends(get_current_user),
+) -> OfferOut:
+    data_response = await offer_service.get(offer_id)
+    return OfferOut(**data_response)
+
+
+@router.get("/{offer_id}/bids", response_model=list[BidOut])
+async def list_bids(
+    offer_id: str,
+    user: dict = Depends(get_current_user),
+    status_filter: BidStatus | None = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> list[BidOut]:
+    data_response = await bid_service.list_for_offer(user, offer_id, status_filter, limit)
+    return [BidOut(**item) for item in data_response]
+
+
+@router.post("/{offer_id}/bids", response_model=BidOut)
+async def place_bid(
+    offer_id: str,
+    payload: BidCreateIn,
+    # require_role memakai dokumen user di DB, bukan claim token.
+    user: dict = Depends(require_role("TECHNICIAN")),
+) -> BidOut:
+    data_response = await bid_service.place_bid(user, offer_id, payload)
+    return BidOut(**data_response)
+
+
+@router.post("/{offer_id}/complete", response_model=OfferOut)
+async def complete_offer(
+    offer_id: str,
+    # Kepemilikan tugas diperiksa di service (technician_id == user).
+    user: dict = Depends(get_current_user),
+) -> OfferOut:
+    data_response = await offer_service.complete(user, offer_id)
+    return OfferOut(**data_response)

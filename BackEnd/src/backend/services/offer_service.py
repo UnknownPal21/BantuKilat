@@ -1,9 +1,11 @@
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 
 from bson import ObjectId
 from bson.errors import InvalidId
+from pymongo import ReturnDocument
 
 from backend.core.errors import ApiError
+from backend.core.timeutils import iso_utc, utcnow
 from backend.db.mongo import db
 from backend.models.offer import OfferCreateIn, OfferStatus
 
@@ -15,23 +17,20 @@ OFFER_TTL_MINUTES = 30
 NEARBY_STATUSES: list[OfferStatus] = ["WAITING", "NEGOTIATING"]
 
 
-def _now() -> datetime:
-    return datetime.now(timezone.utc)
-
-
-def _iso(value: datetime) -> str:
-    # pymongo mengembalikan datetime naive (tz_aware=False), padahal nilainya UTC.
-    # Tanpa tzinfo, Flutter membacanya sebagai waktu lokal.
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.isoformat().replace("+00:00", "Z")
-
-
 def _object_id(value: str, field: str) -> ObjectId:
     try:
         return ObjectId(value)
     except (InvalidId, TypeError) as exc:
         raise ApiError(422, "VALIDATION_ERROR", f"{field} tidak valid") from exc
+
+
+def offer_id_or_404(value: str) -> ObjectId:
+    """Untuk id di path URL: bentuk salah tetap 404, bukan 422."""
+    try:
+        return ObjectId(value)
+    except (InvalidId, TypeError) as exc:
+        raise ApiError(404, "OFFER_NOT_FOUND", "Tawaran tidak ditemukan") from exc
+
 
 
 def _offer_response(doc: dict) -> dict:
@@ -58,9 +57,11 @@ def _offer_response(doc: dict) -> dict:
         "accepted_bid_id": str(accepted_bid_id) if accepted_bid_id else None,
         "technician_id": str(technician_id) if technician_id else None,
         "bid_count": doc.get("bid_count", 0),
-        "created_at": _iso(doc["created_at"]),
-        "updated_at": _iso(doc["updated_at"]),
-        "expires_at": _iso(doc["expires_at"]),
+        "created_at": iso_utc(doc["created_at"]),
+        "updated_at": iso_utc(doc["updated_at"]),
+        "expires_at": iso_utc(doc["expires_at"]),
+        "assigned_at": iso_utc(doc["assigned_at"]) if doc.get("assigned_at") else None,
+        "completed_at": iso_utc(doc["completed_at"]) if doc.get("completed_at") else None,
         # distance_m hanya ada kalau dokumen lewat $geoNear.
         "distance_m": round(doc["distance_m"]) if "distance_m" in doc else None,
     }
@@ -75,7 +76,7 @@ async def create(user: dict, payload: OfferCreateIn) -> dict:
             422, "CATEGORY_NOT_FOUND", "Kategori tidak ditemukan atau tidak aktif"
         )
 
-    now = _now()
+    now = utcnow()
     address = user.get("address") or {}
 
     doc = {
@@ -128,6 +129,56 @@ async def create(user: dict, payload: OfferCreateIn) -> dict:
     return _offer_response(doc)
 
 
+async def get(offer_id: str) -> dict:
+    doc = await db.offers.find_one({"_id": offer_id_or_404(offer_id)})
+    if doc is None:
+        raise ApiError(404, "OFFER_NOT_FOUND", "Tawaran tidak ditemukan")
+    return _offer_response(doc)
+
+
+async def complete(user: dict, offer_id: str) -> dict:
+    oid = offer_id_or_404(offer_id)
+    now = utcnow()
+
+    # Filter ikut memastikan yang menekan tombol adalah teknisi pemenang.
+    # Kalau dua request datang bersamaan, hanya satu yang mengubah dokumen.
+    updated = await db.offers.find_one_and_update(
+        {"_id": oid, "status": "ASSIGNED", "technician_id": user["_id"]},
+        {
+            "$set": {
+                "status": "COMPLETED",
+                "completed_at": now,
+                "updated_at": now,
+            }
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+
+    if updated is None:
+        # Tidak ada dokumen yang cocok -> cari tahu sebabnya untuk pesan yang tepat.
+        offer = await db.offers.find_one({"_id": oid})
+        if offer is None:
+            raise ApiError(404, "OFFER_NOT_FOUND", "Tawaran tidak ditemukan")
+        if offer.get("status") == "COMPLETED":
+            raise ApiError(
+                409, "OFFER_ALREADY_COMPLETED", "Tawaran sudah diselesaikan"
+            )
+        if offer.get("status") != "ASSIGNED":
+            raise ApiError(409, "OFFER_NOT_ASSIGNED", "Tawaran belum ditugaskan")
+        raise ApiError(
+            403,
+            "NOT_ASSIGNED_TECHNICIAN",
+            "Hanya teknisi yang ditugaskan bisa menyelesaikan",
+        )
+
+    # Baru setelah offer benar-benar COMPLETED, naikkan statistik teknisi.
+    await db.users.update_one(
+        {"_id": user["_id"]}, {"$inc": {"tech.completed_count": 1}}
+    )
+
+    return _offer_response(updated)
+
+
 async def nearby(
     lng: float,
     lat: float,
@@ -140,7 +191,7 @@ async def nearby(
         "status": {"$in": NEARBY_STATUSES},
         # Cron EXPIRED belum ada; jangan tampilkan offer yang sudah lewat
         # masa berlaku walau statusnya masih WAITING/NEGOTIATING.
-        "expires_at": {"$gt": _now()},
+        "expires_at": {"$gt": utcnow()},
     }
 
     if category:

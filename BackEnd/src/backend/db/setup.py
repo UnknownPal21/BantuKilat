@@ -192,12 +192,26 @@ async def ensure_offers() -> None:
     await db.offers.create_index([("is_sos", 1), ("expires_at", 1)])
 
 
+async def ensure_bids() -> None:
+    await db.bids.create_index([("offer_id", 1), ("status", 1), ("amount", 1)])
+    # Partial: hanya bid PENDING yang dijaga unik. Teknisi boleh bid ulang
+    # setelah bid lamanya REJECTED/WITHDRAWN/EXPIRED.
+    await db.bids.create_index(
+        [("offer_id", 1), ("technician_id", 1)],
+        unique=True,
+        partialFilterExpression={"status": "PENDING"},
+    )
+    await db.bids.create_index([("technician_id", 1), ("created_at", -1)])
+
+
 async def setup() -> None:
     await ensure_user_indexes()
     await ensure_categories()
     await ensure_offers()
+    await ensure_bids()
     print("categories:", await db.categories.count_documents({}))
     print("offers index:", await db.offers.index_information())
+    print("bids index:", await db.bids.index_information())
 
 
 if __name__ == "__main__":
