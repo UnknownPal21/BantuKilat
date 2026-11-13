@@ -1,7 +1,12 @@
+import 'dart:convert';
+
 import 'package:bantukilat/page/DetailTawaran.dart';
 import 'package:bantukilat/page/teknisi/ListTawaranPage.dart';
 import 'package:bantukilat/page/teknisi/TugasSaya.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:http/http.dart' as http;
 
 class HomePageTeknisi extends StatefulWidget {
   const HomePageTeknisi({super.key});
@@ -19,6 +24,12 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
   // 2. State Kartu Darurat (Bisa di-slide 2 gambar & hilang saat klik Tolak)
   bool _showEmergencyCard = true;
   int _emergencySlideIndex = 0;
+
+  // Alamat di Kartu Darurat yang digunakan bersama oleh teks, slide peta ke-2, dan halaman DetailTawaran
+  final String _emergencyAddress = "RT 02 No. 14, Depan Pos Ronda";
+  final MapController _emergencyMapController = MapController();
+  LatLng _emergencyLocation = const LatLng(-7.2575, 112.7521);
+  bool _isSearchingEmergencyMap = true;
 
   final List<Map<String, dynamic>> _emergencySlides = [
     {"image": "assets/images/dummy.png", "label": "Foto Kerusakan"},
@@ -67,6 +78,91 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
       "upahInt": 50000,
     },
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _geocodeEmergencyAddress();
+  }
+
+  // Melacak lokasi peta untuk slide ke-2 pada Kartu Darurat berdasarkan _emergencyAddress
+  Future<void> _geocodeEmergencyAddress() async {
+    final String raw = _emergencyAddress.trim();
+    if (raw.isEmpty) {
+      if (mounted) setState(() => _isSearchingEmergencyMap = false);
+      return;
+    }
+
+    final List<String> candidates = [];
+    void addUnique(String q) {
+      final clean = q.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (clean.isNotEmpty && !candidates.contains(clean)) {
+        candidates.add(clean);
+      }
+    }
+
+    String expanded = raw
+        .replaceAll(RegExp(r'\bJl\.?\s*', caseSensitive: false), 'Jalan ')
+        .replaceAll(RegExp(r'\bGg\.?\s*', caseSensitive: false), 'Gang ');
+    String withoutNumbers = expanded
+        .replaceAll(
+          RegExp(r'\bNo\.?\s*\d+[a-zA-Z]?\b', caseSensitive: false),
+          '',
+        )
+        .replaceAll(RegExp(r'\bRT\.?\s*\d+\b', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\bRW\.?\s*\d+\b', caseSensitive: false), '');
+    String withoutRoman = withoutNumbers.replaceAll(
+      RegExp(r'\s+\b(I|II|III|IV|V|VI|VII|VIII|IX|X|\d+)\b(?=\s*,|$)'),
+      '',
+    );
+
+    addUnique(expanded);
+    addUnique(withoutNumbers);
+    addUnique(withoutRoman);
+    if (raw.contains(',')) {
+      addUnique(raw.split(',').last.trim());
+    }
+    addUnique(raw);
+
+    try {
+      LatLng? found;
+      for (final q in candidates) {
+        final uri = Uri.parse(
+          'https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(q)}&format=json&limit=1&countrycodes=id',
+        );
+        final response = await http.get(
+          uri,
+          headers: {'User-Agent': 'BantuKilatApp/1.0 (flutter_map)'},
+        );
+        if (response.statusCode == 200) {
+          final List data = json.decode(response.body);
+          if (data.isNotEmpty) {
+            found = LatLng(
+              double.parse(data[0]['lat']),
+              double.parse(data[0]['lon']),
+            );
+            break;
+          }
+        }
+      }
+
+      if (found != null && mounted) {
+        setState(() {
+          _emergencyLocation = found!;
+          _isSearchingEmergencyMap = false;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          try {
+            _emergencyMapController.move(_emergencyLocation, 15.5);
+          } catch (_) {}
+        });
+      } else {
+        if (mounted) setState(() => _isSearchingEmergencyMap = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isSearchingEmergencyMap = false);
+    }
+  }
 
   // Widget Sidebar (Overlay Drawer)
   Widget _buildSidebar(BuildContext context) {
@@ -597,9 +693,9 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                                 ),
                               ),
 
-                              // SLIDER 2 GAMBAR (FOTO KERUSAKAN & PETA)
+                              // SLIDER 2 ITEM (SLIDE 1: FOTO KERUSAKAN, SLIDE 2: PETA LOKASI ASLI)
                               SizedBox(
-                                height: 130,
+                                height: 200,
                                 width: MediaQuery.of(context).size.width,
                                 child: ClipRRect(
                                   borderRadius: BorderRadius.circular(10.0),
@@ -614,25 +710,80 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                                       return Stack(
                                         fit: StackFit.expand,
                                         children: [
-                                          Image.asset(
-                                            _emergencySlides[index]["image"]!,
-                                            height: 130,
-                                            width: MediaQuery.of(context)
-                                                .size
-                                                .width,
-                                            fit: BoxFit.cover,
-                                            errorBuilder:
-                                                (context, error, stackTrace) {
-                                                  return Container(
-                                                    height: 130,
-                                                    color: Colors.grey[300],
-                                                    child: const Icon(
-                                                      Icons.broken_image,
-                                                      color: Colors.grey,
+                                          if (index == 0)
+                                            Image.asset(
+                                              _emergencySlides[index]["image"]!,
+                                              height: 130,
+                                              width: MediaQuery.of(context)
+                                                  .size
+                                                  .width,
+                                              fit: BoxFit.cover,
+                                              errorBuilder:
+                                                  (context, error, stackTrace) {
+                                                    return Container(
+                                                      height: 130,
+                                                      color: Colors.grey[300],
+                                                      child: const Icon(
+                                                        Icons.broken_image,
+                                                        color: Colors.grey,
+                                                      ),
+                                                    );
+                                                  },
+                                            )
+                                          else
+                                            // Slide ke-2: Maps otomatis sesuai alamat di container darurat
+                                            IgnorePointer(
+                                              child: FlutterMap(
+                                                mapController:
+                                                    _emergencyMapController,
+                                                options: MapOptions(
+                                                  initialCenter:
+                                                      _emergencyLocation,
+                                                  initialZoom: 15.5,
+                                                ),
+                                                children: [
+                                                  TileLayer(
+                                                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                                    userAgentPackageName:
+                                                        'com.bantukilat.app',
+                                                  ),
+                                                  MarkerLayer(
+                                                    markers: [
+                                                      Marker(
+                                                        point:
+                                                            _emergencyLocation,
+                                                        width: 44,
+                                                        height: 44,
+                                                        alignment:
+                                                            Alignment.topCenter,
+                                                        child: const Icon(
+                                                          Icons.location_on,
+                                                          color: Color(
+                                                            0xffe52a28,
+                                                          ),
+                                                          size: 34,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          if (index == 1 &&
+                                              _isSearchingEmergencyMap)
+                                            Container(
+                                              color: Colors.black12,
+                                              alignment: Alignment.center,
+                                              child: const SizedBox(
+                                                width: 18,
+                                                height: 18,
+                                                child:
+                                                    CircularProgressIndicator(
+                                                      strokeWidth: 2,
+                                                      color: Color(0xff006a49),
                                                     ),
-                                                  );
-                                                },
-                                          ),
+                                              ),
+                                            ),
                                           Positioned(
                                             top: 8,
                                             right: 8,
@@ -715,13 +866,13 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                                 ),
                               ),
 
-                              const Padding(
-                                padding: EdgeInsets.only(bottom: 5),
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 5),
                                 child: Align(
                                   alignment: Alignment.centerLeft,
                                   child: Text(
-                                    "Lokasi: RT 02 No. 14, Depan Pos Ronda",
-                                    style: TextStyle(
+                                    "Lokasi: $_emergencyAddress",
+                                    style: const TextStyle(
                                       fontWeight: FontWeight.w600,
                                       fontSize: 10,
                                       color: Color(0xff000000),
@@ -739,7 +890,7 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                                   ),
                                   child: const Padding(
                                     padding: EdgeInsets.symmetric(
-                                      horizontal: 5,
+                                      horizontal: 15,
                                     ),
                                     child: Column(
                                       children: [
@@ -771,7 +922,7 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                                 padding: const EdgeInsets.only(top: 10),
                                 child: Row(
                                   mainAxisAlignment:
-                                      MainAxisAlignment.spaceBetween,
+                                      MainAxisAlignment.spaceEvenly,
                                   children: [
                                     // TOMBOL TOLAK (Menghilangkan Container Darurat)
                                     InkWell(
@@ -793,7 +944,7 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                                         );
                                       },
                                       child: Container(
-                                        width: 110,
+                                        width: 130,
                                         height: 40,
                                         decoration: BoxDecoration(
                                           color: const Color(0xffe52a28),
@@ -819,23 +970,22 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                                         Navigator.push(
                                           context,
                                           MaterialPageRoute(
-                                            builder: (context) =>
-                                                const DetailTawaran(
-                                                  title: "Kran Pipa Jebol & Air Meluap",
-                                                  customerName: "Ibu Ratna",
-                                                  previewImage:
-                                                      "assets/images/dummy.png",
-                                                  description: "Kran patah di drat tembok, air meluap ke kamar tidur! Butuh bantuan segera sebelum banjir ke kasur.",
-                                                  mapImage:
-                                                      "assets/images/dummy.png",
-                                                  addressDetail: "RT 02 No. 14, Depan Pos Ronda",
-                                                  initialWage: 55000,
-                                                ),
+                                            builder: (context) => DetailTawaran(
+                                              title: "Kran Pipa Jebol & Air Meluap",
+                                              customerName: "Ibu Ratna",
+                                              previewImage:
+                                                  "assets/images/dummy.png",
+                                              description: "Kran patah di drat tembok, air meluap ke kamar tidur! Butuh bantuan segera sebelum banjir ke kasur.",
+                                              mapImage:
+                                                  "assets/images/dummy.png",
+                                              addressDetail: _emergencyAddress,
+                                              initialWage: 55000,
+                                            ),
                                           ),
                                         );
                                       },
                                       child: Container(
-                                        width: 110,
+                                        width: 130,
                                         height: 40,
                                         decoration: BoxDecoration(
                                           color: const Color(0xff006546),

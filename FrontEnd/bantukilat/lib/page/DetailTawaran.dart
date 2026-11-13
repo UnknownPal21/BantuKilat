@@ -1,5 +1,10 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_map/flutter_map.dart';
+import 'package:latlong2/latlong.dart';
+import 'package:http/http.dart' as http;
 
 class DetailTawaran extends StatefulWidget {
   final String title;
@@ -33,6 +38,245 @@ class _DetailTawaranState extends State<DetailTawaran> {
   int? _customNegotiatedTotal;
 
   final List<int> _presetIncrements = [5000, 15000, 30000];
+
+  // State & Controller untuk pelacakan lokasi peta berdasarkan teks addressDetail
+  final MapController _previewMapController = MapController();
+  LatLng _trackedLocation = const LatLng(
+    -7.2575,
+    112.7521,
+  ); // Default fallback (Surabaya)
+  bool _isSearchingLocation = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _geocodeAddressFromText();
+  }
+
+  @override
+  void didUpdateWidget(covariant DetailTawaran oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.addressDetail != widget.addressDetail) {
+      _geocodeAddressFromText();
+    }
+  }
+
+  // Menghasilkan daftar variasi kueri dari yang paling spesifik hingga nama jalan utama
+  List<String> _buildSearchQueries(String raw) {
+    final List<String> queries = [];
+
+    void addUnique(String q) {
+      final clean = q.replaceAll(RegExp(r'\s+'), ' ').trim();
+      if (clean.isNotEmpty && !queries.contains(clean)) {
+        queries.add(clean);
+      }
+    }
+
+    // 1. Ganti singkatan umum ("Jl." -> "Jalan", "Gg." -> "Gang")
+    String expanded = raw
+        .replaceAll(RegExp(r'\bJl\.?\s*', caseSensitive: false), 'Jalan ')
+        .replaceAll(RegExp(r'\bGg\.?\s*', caseSensitive: false), 'Gang ');
+    addUnique(expanded);
+
+    // 2. Hapus nomor rumah, RT/RW, dan blok yang bikin OSM gagal mencocokkan jalan
+    String withoutNumbers = expanded
+        .replaceAll(
+          RegExp(r'\bNo\.?\s*\d+[a-zA-Z]?\b', caseSensitive: false),
+          '',
+        )
+        .replaceAll(RegExp(r'\bRT\.?\s*\d+\b', caseSensitive: false), '')
+        .replaceAll(RegExp(r'\bRW\.?\s*\d+\b', caseSensitive: false), '')
+        .replaceAll(
+          RegExp(r'\bBlok\s*[a-zA-Z0-9]+\b', caseSensitive: false),
+          '',
+        );
+    addUnique(withoutNumbers);
+
+    // 3. Hapus angka Romawi gang (I, II, III, IV, V, dst.) sebelum koma
+    String withoutRoman = withoutNumbers.replaceAll(
+      RegExp(r'\s+\b(I|II|III|IV|V|VI|VII|VIII|IX|X|\d+)\b(?=\s*,|$)'),
+      '',
+    );
+    addUnique(withoutRoman);
+
+    // 4. Hapus kata arah/sub-jalan ("Barat", "Timur", "Utara", "Selatan", "Tengah")
+    // jika di OSM hanya terdaftar nama jalan utamanya (misal: "Jalan Kalijudan, Surabaya")
+    String mainRoadOnly = withoutRoman.replaceAll(
+      RegExp(
+        r'\s+\b(Barat|Timur|Utara|Selatan|Tengah)\b(?=\s*,|$)',
+        caseSensitive: false,
+      ),
+      '',
+    );
+    addUnique(mainRoadOnly);
+
+    // 5. Jika tidak ada kata "Surabaya", tambahkan konteks Surabaya agar tidak nyasar ke luar kota
+    if (!raw.toLowerCase().contains('surabaya')) {
+      addUnique('$withoutRoman, Surabaya');
+      addUnique('$mainRoadOnly, Surabaya');
+    }
+
+    // 6. Coba juga teks asli apa adanya
+    addUnique(raw);
+
+    return queries;
+  }
+
+  // Melacak koordinat otomatis dari teks widget.addressDetail menggunakan Nominatim OSM
+  Future<void> _geocodeAddressFromText() async {
+    final String rawQuery = widget.addressDetail.trim();
+    if (rawQuery.isEmpty) {
+      if (mounted) setState(() => _isSearchingLocation = false);
+      return;
+    }
+
+    if (mounted) setState(() => _isSearchingLocation = true);
+
+    try {
+      LatLng? result;
+      final List<String> candidates = _buildSearchQueries(rawQuery);
+
+      for (final q in candidates) {
+        result = await _fetchCoordinates(q);
+        if (result != null) break;
+      }
+
+      if (result != null && mounted) {
+        setState(() {
+          _trackedLocation = result!;
+          _isSearchingLocation = false;
+        });
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          try {
+            _previewMapController.move(_trackedLocation, 15.5);
+          } catch (_) {}
+        });
+      } else {
+        if (mounted) setState(() => _isSearchingLocation = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isSearchingLocation = false);
+    }
+  }
+
+  Future<LatLng?> _fetchCoordinates(String query) async {
+    final uri = Uri.parse(
+      'https://nominatim.openstreetmap.org/search?q=${Uri.encodeComponent(query)}&format=json&limit=1&countrycodes=id',
+    );
+    final response = await http.get(
+      uri,
+      headers: {'User-Agent': 'BantuKilatApp/1.0 (flutter_map)'},
+    );
+    if (response.statusCode == 200) {
+      final List data = json.decode(response.body);
+      if (data.isNotEmpty) {
+        final double lat = double.parse(data[0]['lat']);
+        final double lon = double.parse(data[0]['lon']);
+        return LatLng(lat, lon);
+      }
+    }
+    return null;
+  }
+
+  // Fungsi membuka Peta secara Full Screen & Interaktif (mengikuti style dialog sebelumnya)
+  void _openFullScreenMap() {
+    showDialog(
+      context: context,
+      barrierColor: Colors.black.withValues(alpha: 0.92),
+      builder: (ctx) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            SizedBox(
+              width: MediaQuery.of(context).size.width,
+              height: MediaQuery.of(context).size.height,
+              child: FlutterMap(
+                options: MapOptions(
+                  initialCenter: _trackedLocation,
+                  initialZoom: 16.0,
+                  minZoom: 5.0,
+                  maxZoom: 19.0,
+                ),
+                children: [
+                  TileLayer(
+                    urlTemplate:
+                        'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    userAgentPackageName: 'com.bantukilat.app',
+                  ),
+                  MarkerLayer(
+                    markers: [
+                      Marker(
+                        point: _trackedLocation,
+                        width: 60,
+                        height: 60,
+                        alignment: Alignment.topCenter,
+                        child: const Icon(
+                          Icons.location_on,
+                          color: Color(0xff006a49),
+                          size: 46,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            Positioned(
+              top: 40,
+              left: 20,
+              right: 75,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 8,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black87,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.location_on,
+                      color: Color(0xff00e699),
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        "Lokasi: ${widget.addressDetail}",
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            Positioned(
+              top: 35,
+              right: 20,
+              child: CircleAvatar(
+                backgroundColor: Colors.black54,
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: Colors.white),
+                  onPressed: () => Navigator.pop(ctx),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 
   // Fungsi helper untuk format angka ke "Rp 15.000" tanpa package tambahan
   String _formatRupiah(int amount) {
@@ -176,7 +420,8 @@ class _DetailTawaranState extends State<DetailTawaran> {
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xff006a49).withValues(alpha: 0.12),
+                            color: const Color(0xff006a49)
+                                .withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: const Icon(
@@ -516,62 +761,139 @@ class _DetailTawaranState extends State<DetailTawaran> {
                                   ),
                                 ),
                               ),
-                              // Gambar 2: Peta Dummy (Klik untuk Full Screen)
+                              // Gambar 2: Peta Lokasi Dinamis (Melacak dari teks addressDetail & Klik untuk Full Screen)
                               Padding(
                                 padding: const EdgeInsets.symmetric(
                                   vertical: 12,
                                 ),
                                 child: GestureDetector(
-                                  onTap: () => _openFullScreenImage(
-                                    widget.mapImage,
-                                    "Lokasi: ${widget.addressDetail}",
-                                  ),
+                                  onTap: _openFullScreenMap,
                                   child: ClipRRect(
                                     borderRadius: BorderRadius.circular(14),
-                                    child: Stack(
-                                      children: [
-                                        _buildAdaptiveImage(
-                                          widget.mapImage,
-                                          height: 185,
-                                          width: MediaQuery.of(context)
-                                              .size
-                                              .width,
-                                          fit: BoxFit.cover,
-                                        ),
-                                        Positioned(
-                                          bottom: 8,
-                                          right: 8,
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 8,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: Colors.black54,
-                                              borderRadius:
-                                                  BorderRadius.circular(12),
-                                            ),
-                                            child: const Row(
-                                              mainAxisSize: MainAxisSize.min,
+                                    child: SizedBox(
+                                      height: 185,
+                                      width: MediaQuery.of(context).size.width,
+                                      child: Stack(
+                                        children: [
+                                          // Peta dikunci dari gesture langsung agar tidak mengganggu scroll halaman,
+                                          // dan ketika diklik akan membuka _openFullScreenMap
+                                          IgnorePointer(
+                                            child: FlutterMap(
+                                              mapController:
+                                                  _previewMapController,
+                                              options: MapOptions(
+                                                initialCenter: _trackedLocation,
+                                                initialZoom: 15.5,
+                                              ),
                                               children: [
-                                                Icon(
-                                                  Icons.zoom_out_map,
-                                                  color: Colors.white,
-                                                  size: 14,
+                                                TileLayer(
+                                                  urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                                                  userAgentPackageName:
+                                                      'com.bantukilat.app',
                                                 ),
-                                                SizedBox(width: 4),
-                                                Text(
-                                                  "Lihat Peta",
-                                                  style: TextStyle(
-                                                    color: Colors.white,
-                                                    fontSize: 10,
-                                                  ),
+                                                MarkerLayer(
+                                                  markers: [
+                                                    Marker(
+                                                      point: _trackedLocation,
+                                                      width: 50,
+                                                      height: 50,
+                                                      alignment:
+                                                          Alignment.topCenter,
+                                                      child: const Icon(
+                                                        Icons.location_on,
+                                                        color: Color(
+                                                          0xff006a49,
+                                                        ),
+                                                        size: 38,
+                                                      ),
+                                                    ),
+                                                  ],
                                                 ),
                                               ],
                                             ),
                                           ),
-                                        ),
-                                      ],
+                                          if (_isSearchingLocation)
+                                            Container(
+                                              color: Colors.black12,
+                                              alignment: Alignment.center,
+                                              child: Container(
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      horizontal: 12,
+                                                      vertical: 8,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white,
+                                                  borderRadius:
+                                                      BorderRadius.circular(12),
+                                                ),
+                                                child: const Row(
+                                                  mainAxisSize:
+                                                      MainAxisSize.min,
+                                                  children: [
+                                                    SizedBox(
+                                                      width: 14,
+                                                      height: 14,
+                                                      child:
+                                                          CircularProgressIndicator(
+                                                            strokeWidth: 2,
+                                                            color: Color(
+                                                              0xff006a49,
+                                                            ),
+                                                          ),
+                                                    ),
+                                                    SizedBox(width: 8),
+                                                    Text(
+                                                      "Melacak lokasi...",
+                                                      style: TextStyle(
+                                                        fontSize: 11,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        color: Color(
+                                                          0xff006a49,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ),
+                                          Positioned(
+                                            bottom: 8,
+                                            right: 8,
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 8,
+                                                    vertical: 4,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: Colors.black54,
+                                                borderRadius:
+                                                    BorderRadius.circular(12),
+                                              ),
+                                              child: const Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Icon(
+                                                    Icons.zoom_out_map,
+                                                    color: Colors.white,
+                                                    size: 14,
+                                                  ),
+                                                  SizedBox(width: 4),
+                                                  Text(
+                                                    "Lihat Peta",
+                                                    style: TextStyle(
+                                                      color: Colors.white,
+                                                      fontSize: 10,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
                                   ),
                                 ),
