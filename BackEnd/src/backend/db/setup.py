@@ -190,6 +190,11 @@ async def ensure_offers() -> None:
         [("technician_id", 1), ("status", 1), ("updated_at", -1)]
     )
     await db.offers.create_index([("is_sos", 1), ("expires_at", 1)])
+    # Dipakai job expire_overdue: cari offer terbuka yang sudah lewat waktu.
+    await db.offers.create_index(
+        [("status", 1), ("expires_at", 1)],
+        partialFilterExpression={"status": {"$in": ["WAITING", "NEGOTIATING"]}},
+    )
 
 
 async def ensure_bids() -> None:

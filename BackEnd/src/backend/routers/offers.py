@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, Query, status
 
 from backend.core.deps import get_current_user, require_role
 from backend.models.bid import BidCreateIn, BidOut, BidStatus
-from backend.models.offer import OfferCreateIn, OfferOut, OfferStatus
+from backend.models.offer import OfferCancelIn, OfferCreateIn, OfferOut, OfferStatus
 from backend.services import bid_service, offer_service
 
 router = APIRouter(prefix="/offers", tags=["offers"])
@@ -61,7 +61,9 @@ async def list_bids(
     status_filter: BidStatus | None = Query(default=None, alias="status"),
     limit: int = Query(default=50, ge=1, le=100),
 ) -> list[BidOut]:
-    data_response = await bid_service.list_for_offer(user, offer_id, status_filter, limit)
+    data_response = await bid_service.list_for_offer(
+        user, offer_id, status_filter, limit
+    )
     return [BidOut(**item) for item in data_response]
 
 
@@ -83,4 +85,20 @@ async def complete_offer(
     user: dict = Depends(get_current_user),
 ) -> OfferOut:
     data_response = await offer_service.complete(user, offer_id)
+    return OfferOut(**data_response)
+
+
+@router.post("/{offer_id}/cancel", response_model=OfferOut)
+async def cancel_offer(
+    offer_id: str,
+    payload: OfferCancelIn | None = None,
+    user: dict = Depends(get_current_user),
+) -> OfferOut:
+    """Batalkan tawaran (hanya selama belum ada teknisi yang ditugaskan).
+
+    Body boleh kosong: alasan default `LAINNYA`.
+    """
+    data_response = await offer_service.cancel(
+        user, offer_id, payload or OfferCancelIn()
+    )
     return OfferOut(**data_response)

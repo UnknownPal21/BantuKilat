@@ -9,6 +9,8 @@ from backend.core.errors import (
     api_error_handler,
     validation_error_handler,
 )
+from backend.core.scheduler import start as start_jobs
+from backend.core.scheduler import stop as stop_jobs
 from backend.db.mongo import client, close_client
 from backend.routers.auth import router as auth_router
 from backend.routers.ai import router as ai_router
@@ -21,8 +23,14 @@ from backend.routers.offers import router as offers_router
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await client.admin.command("ping")
-    yield
-    await close_client()
+    # Offer lewat expires_at diubah ke EXPIRED di latar belakang, supaya
+    # daftar "tawaran saya" dan bid yang menggantung ikut beres.
+    job = await start_jobs()
+    try:
+        yield
+    finally:
+        await stop_jobs(job)
+        await close_client()
 
 
 app = FastAPI(lifespan=lifespan, title="BantuKilat API", version="0.1.0")

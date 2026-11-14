@@ -7,7 +7,7 @@ from pymongo import ReturnDocument
 from backend.core.errors import ApiError
 from backend.core.timeutils import iso_utc, utcnow
 from backend.db.mongo import db
-from backend.models.offer import OfferCreateIn, OfferStatus
+from backend.models.offer import OfferCancelIn, OfferCreateIn, OfferStatus
 from backend.services import ai_client, media_service, price_service
 
 # Server yang menentukan fee, bukan client (spec §4 aturan bisnis).
@@ -74,6 +74,8 @@ def _offer_response(doc: dict) -> dict:
         "expires_at": iso_utc(doc["expires_at"]),
         "assigned_at": iso_utc(doc["assigned_at"]) if doc.get("assigned_at") else None,
         "completed_at": iso_utc(doc["completed_at"]) if doc.get("completed_at") else None,
+        "cancelled_at": iso_utc(doc["cancelled_at"]) if doc.get("cancelled_at") else None,
+        "cancel_reason": doc.get("cancel_reason"),
         # distance_m hanya ada kalau dokumen lewat $geoNear.
         "distance_m": round(doc["distance_m"]) if "distance_m" in doc else None,
     }
@@ -138,6 +140,7 @@ async def create(user: dict, payload: OfferCreateIn) -> dict:
         "assigned_at": None,
         "completed_at": None,
         "cancel_reason": None,
+        "cancelled_at": None,
     }
 
     result = await db.offers.insert_one(doc)
@@ -221,6 +224,164 @@ async def _ensure_completion_side_effects(offer: dict) -> None:
     sampel.
     """
     await _record_deal_sample(offer)
+
+
+async def cancel(user: dict, offer_id: str, payload: OfferCancelIn) -> dict:
+    """User membatalkan tawarannya sendiri.
+
+    Hanya boleh selama belum ada teknisi yang ditugaskan. Setelah `ASSIGNED`
+    teknisi sudah menolak pekerjaan lain demi tawaran ini, jadi pembatalan
+    harus lewat jalur lain (belum ada) — bukan diam-diam di sini.
+    """
+    oid = offer_id_or_404(offer_id)
+    now = utcnow()
+
+    # Guard pada status ikut di filter penulisan, bukan hanya dicek dulu:
+    # dua request bersamaan tidak bisa sama-sama berhasil.
+    updated = await db.offers.find_one_and_update(
+        {
+            "_id": oid,
+            "requester_id": user["_id"],
+            "status": {"$in": ["WAITING", "NEGOTIATING"]},
+        },
+        {
+            "$set": {
+                "status": "CANCELLED",
+                "cancel_reason": payload.reason,
+                "cancelled_at": now,
+                "updated_at": now,
+            }
+        },
+        return_document=ReturnDocument.AFTER,
+    )
+
+    if updated is None:
+        offer = await db.offers.find_one(
+            {"_id": oid}, {"requester_id": 1, "status": 1}
+        )
+        if offer is None:
+            raise ApiError(404, "OFFER_NOT_FOUND", "Tawaran tidak ditemukan")
+        if offer["requester_id"] != user["_id"]:
+            raise ApiError(
+                403, "NOT_OFFER_OWNER", "Hanya pembuat tawaran yang bisa membatalkan"
+            )
+        if offer["status"] == "CANCELLED":
+            # Menekan tombol dua kali bukan error yang perlu ditakuti user.
+            return await get(offer_id)
+        if offer["status"] == "EXPIRED":
+            raise ApiError(409, "OFFER_EXPIRED", "Tawaran sudah kedaluwarsa")
+        if offer["status"] == "ASSIGNED":
+            raise ApiError(
+                409,
+                "OFFER_ALREADY_ASSIGNED",
+                "Tawaran sudah diambil teknisi dan tidak bisa dibatalkan",
+            )
+        raise ApiError(
+            409, "OFFER_NOT_CANCELLABLE", "Tawaran ini tidak bisa dibatalkan"
+        )
+
+    # Bid yang masih menunggu tidak boleh menggantung: teknisinya perlu tahu
+    # bahwa tawarannya tidak akan pernah dipilih.
+    await db.bids.update_many(
+        {"offer_id": oid, "status": "PENDING"},
+        {"$set": {"status": "WITHDRAWN", "updated_at": now}},
+    )
+    await _refresh_bid_count(oid, now)
+
+    return _offer_response(updated)
+
+
+async def expire_overdue(limit: int = 500) -> int:
+    """Ubah offer lewat `expires_at` menjadi EXPIRED.
+
+    Dipanggil dari job periodik. Selama ini offer mati hanya *disaring* di
+    query (`nearby`, `place_bid`, `accept`), sehingga dokumennya tetap
+    berstatus WAITING/NEGOTIATING di database: daftar "tawaran saya" user
+    menampilkan tawaran yang sebenarnya sudah mati, dan bid di dalamnya
+    menggantung PENDING selamanya.
+
+    Mengembalikan jumlah offer yang berubah status.
+    """
+    now = utcnow()
+    cursor = db.offers.find(
+        {
+            "status": {"$in": NEARBY_STATUSES},
+            "expires_at": {"$lte": now},
+        },
+        {"_id": 1},
+    ).limit(limit)
+    ids = [doc["_id"] async for doc in cursor]
+    if not ids:
+        return 0
+
+    # Filter status diulang di sini: offer bisa saja baru saja di-accept
+    # teknisi di antara pembacaan di atas dan penulisan ini.
+    result = await db.offers.update_many(
+        {
+            "_id": {"$in": ids},
+            "status": {"$in": NEARBY_STATUSES},
+            "expires_at": {"$lte": now},
+        },
+        {
+            "$set": {
+                "status": "EXPIRED",
+                "cancelled_at": now,
+                "cancel_reason": "KEDALUWARSA",
+                "updated_at": now,
+            }
+        },
+    )
+    if result.modified_count:
+        await db.bids.update_many(
+            {
+                "offer_id": {"$in": ids},
+                "status": "PENDING",
+            },
+            {"$set": {"status": "EXPIRED", "updated_at": now}},
+        )
+    return result.modified_count
+
+
+async def _refresh_bid_count(offer_id: ObjectId, now) -> None:
+    """Hitung ulang bid_count dari bid PENDING.
+
+    Dihitung ulang, bukan dikurangi satu-satu, supaya angka tidak pernah
+    menyimpang walau ada withdraw/reject di jalur lain.
+    """
+    count = await db.bids.count_documents({"offer_id": offer_id, "status": "PENDING"})
+    await db.offers.update_one(
+        {"_id": offer_id},
+        {"$set": {"bid_count": count, "updated_at": now}},
+    )
+
+
+async def sync_after_bid_change(offer_id: ObjectId, now) -> int:
+    """Samakan status offer & bid_count setelah bid berubah (withdraw/reject).
+
+    Kalau bid PENDING terakhir hilang, offer kembali ke WAITING. Tanpa ini
+    tawaran tetap berstatus NEGOTIATING padahal tidak ada yang ditawar dan
+    tidak bisa ditawar lagi oleh teknisi baru.
+
+    Filter status di penulisan menjaga offer yang baru saja di-accept tidak
+    ikut diturunkan kembali.
+    """
+    pending = await db.bids.count_documents(
+        {"offer_id": offer_id, "status": "PENDING"}
+    )
+    await db.offers.update_one(
+        {
+            "_id": offer_id,
+            "status": {"$in": ["WAITING", "NEGOTIATING"]},
+        },
+        {
+            "$set": {
+                "bid_count": pending,
+                "status": "NEGOTIATING" if pending else "WAITING",
+                "updated_at": now,
+            }
+        },
+    )
+    return pending
 
 
 async def _record_deal_sample(offer: dict) -> None:

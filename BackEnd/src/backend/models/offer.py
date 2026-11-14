@@ -14,6 +14,15 @@ OfferStatus = Literal[
 # photos berisi id media hasil POST /media (URL /media/<id> juga diterima dan
 # dinormalisasi di service). Data URI ditolak: base64 tidak pernah masuk DB.
 
+# Alasan batal dibatasi pilihan, bukan teks bebas: dipakai untuk statistik
+# "kenapa tawaran gagal" tanpa perlu NLP.
+CancelReason = Literal[
+    "SUDAH_SELESAI",
+    "SALAH_INPUT",
+    "TERLALU_LAMA",
+    "LAINNYA",
+]
+
 
 class OfferCreateIn(BaseModel):
     category_id: str
@@ -56,6 +65,23 @@ class OfferCreateIn(BaseModel):
         return cleaned
 
 
+class OfferCancelIn(BaseModel):
+    """Alasan batal. Opsional supaya user tidak dipaksa memilih saat panik."""
+
+    reason: CancelReason = "LAINNYA"
+    note: str | None = Field(default=None, max_length=200)
+
+    model_config = {"extra": "forbid"}
+
+    @field_validator("note")
+    @classmethod
+    def strip_note(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        v = v.strip()
+        return v or None
+
+
 class OfferOut(BaseModel):
     id: str = Field(alias="_id")
     requester_id: str
@@ -86,6 +112,9 @@ class OfferOut(BaseModel):
     expires_at: str
     assigned_at: str | None = None
     completed_at: str | None = None
+    # Terisi hanya kalau offer dibatalkan user atau kedaluwarsa.
+    cancelled_at: str | None = None
+    cancel_reason: str | None = None
 
     # Hanya terisi pada GET /offers/nearby ($geoNear).
     distance_m: int | None = None

@@ -27,6 +27,11 @@ class Settings(BaseSettings):
     media_daily_view_limit: int = 600
     media_daily_upload_limit: int = 60
 
+    # Job latar belakang yang mengubah offer lewat expires_at menjadi EXPIRED.
+    # Test mematikannya supaya data uji tidak berubah di tengah tes.
+    expire_job_enabled: bool = True
+    expire_check_seconds: int = 60
+
     # Provider AI apa pun yang bicara protokol OpenAI-compatible. Default
     # Gemini; ganti tiga nilai ini untuk pindah ke OpenAI/OpenRouter/Groq
     # tanpa menyentuh kode.

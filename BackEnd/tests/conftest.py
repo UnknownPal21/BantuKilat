@@ -12,6 +12,9 @@ os.environ["MONGO_DB_NAME"] = TEST_DB
 # Tes tidak boleh memanggil provider berbayar. Tes yang ingin menguji jalur
 # provider memakai base URL lokal yang pasti gagal (127.0.0.1:9).
 os.environ["AI_API_KEY"] = ""
+# Job latar belakang mengubah offer milik tes di tengah jalan; tes memanggil
+# `expire_overdue()` langsung saat ingin mengujinya.
+os.environ["EXPIRE_JOB_ENABLED"] = "false"
 
 import itertools  # noqa: E402
 import time  # noqa: E402

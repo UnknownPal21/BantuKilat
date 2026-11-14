@@ -142,6 +142,84 @@ async def place_bid(user: dict, offer_id: str, payload: BidCreateIn) -> dict:
     return _bid_response(bid)
 
 
+async def withdraw(user: dict, bid_id: str) -> dict:
+    """Teknisi menarik penawarannya sendiri.
+
+    Hanya bid PENDING yang bisa ditarik. Bid yang sudah ACCEPTED berarti
+    teknisi itu sudah ditugaskan; menariknya sama dengan membatalkan tugas,
+    dan itu belum punya alur sendiri.
+    """
+    bid_oid = bid_id_or_404(bid_id)
+    now = utcnow()
+
+    updated = await db.bids.find_one_and_update(
+        {"_id": bid_oid, "technician_id": user["_id"], "status": "PENDING"},
+        {"$set": {"status": "WITHDRAWN", "updated_at": now}},
+        return_document=ReturnDocument.AFTER,
+    )
+
+    if updated is None:
+        bid = await db.bids.find_one(
+            {"_id": bid_oid}, {"technician_id": 1, "status": 1, "offer_id": 1}
+        )
+        if bid is None:
+            raise ApiError(404, "BID_NOT_FOUND", "Penawaran tidak ditemukan")
+        if bid["technician_id"] != user["_id"]:
+            raise ApiError(
+                403, "NOT_BID_OWNER", "Hanya pemilik penawaran yang bisa menariknya"
+            )
+        if bid["status"] == "WITHDRAWN":
+            # Idempoten: menekan dua kali bukan kegagalan.
+            return _bid_response(bid)
+        if bid["status"] == "ACCEPTED":
+            raise ApiError(
+                409, "BID_ALREADY_ACCEPTED", "Penawaran sudah diterima user"
+            )
+        raise ApiError(409, "BID_NOT_PENDING", "Penawaran ini sudah tidak aktif")
+
+    await offer_service.sync_after_bid_change(updated["offer_id"], now)
+    return _bid_response(updated)
+
+
+async def reject(user: dict, bid_id: str) -> dict:
+    """User menolak satu penawaran tanpa menerima yang lain.
+
+    Ini yang membuat NEGOTIATING bisa kembali ke WAITING: kalau semua bid
+    ditolak, tawaran terbuka lagi untuk teknisi lain.
+    """
+    bid_oid = bid_id_or_404(bid_id)
+    now = utcnow()
+
+    bid = await db.bids.find_one({"_id": bid_oid})
+    if bid is None:
+        raise ApiError(404, "BID_NOT_FOUND", "Penawaran tidak ditemukan")
+
+    offer = await db.offers.find_one(
+        {"_id": bid["offer_id"]}, {"requester_id": 1, "status": 1}
+    )
+    if offer is None:
+        raise ApiError(404, "OFFER_NOT_FOUND", "Tawaran tidak ditemukan")
+    if offer["requester_id"] != user["_id"]:
+        raise ApiError(
+            403, "NOT_OFFER_OWNER", "Hanya pembuat tawaran yang bisa menolak penawaran"
+        )
+    if offer["status"] not in ("WAITING", "NEGOTIATING"):
+        raise ApiError(409, "OFFER_NOT_OPEN", "Tawaran sudah tidak menerima penawaran")
+
+    updated = await db.bids.find_one_and_update(
+        {"_id": bid_oid, "status": "PENDING"},
+        {"$set": {"status": "REJECTED", "updated_at": now}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if updated is None:
+        if bid["status"] == "REJECTED":
+            return _bid_response(bid)
+        raise ApiError(409, "BID_NOT_PENDING", "Penawaran ini sudah tidak aktif")
+
+    await offer_service.sync_after_bid_change(updated["offer_id"], now)
+    return _bid_response(updated)
+
+
 async def accept(user: dict, bid_id: str) -> dict:
     bid_oid = bid_id_or_404(bid_id)
     now = utcnow()
