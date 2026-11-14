@@ -4,8 +4,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 
 class AuthService {
-  static const String _baseUrl =
-      'https://517d17c3be9a940d.kyydayxlyodt.opentunnel.xyz';
+  static const String _baseUrl = 'https://bantukilat.fastapicloud.dev';
   static const FlutterSecureStorage _storage = FlutterSecureStorage();
 
   static Future<Map<String, dynamic>> login({
@@ -72,6 +71,8 @@ class AuthService {
 
   static String _errorMessage(dynamic response) {
     if (response is Map) {
+      final message = response['message'];
+      if (message is String) return message;
       final detail = response['detail'];
       if (detail is String) return detail;
       if (detail is List) {
@@ -259,7 +260,7 @@ class AuthService {
     final profile = await getCurrentUser();
     final technicianId = profile?['_id']?.toString();
     if (technicianId == null) return [];
-    
+
     // 1. Ambil tawaran sekitar/semua tawaran status WAITING, ASSIGNED, COMPLETED, dll
     final offers = await getNearbyOffers(
       latitude: latitude,
@@ -272,9 +273,11 @@ class AuthService {
     for (final offer in offers) {
       final status = '${offer['status'] ?? ''}'.toUpperCase();
       final tId = offer['technician_id']?.toString();
-      
-      bool isMyAssignedTask = tId == technicianId && (status == 'ASSIGNED' || status == 'COMPLETED');
-      
+
+      bool isMyAssignedTask =
+          tId == technicianId &&
+          (status == 'ASSIGNED' || status == 'COMPLETED');
+
       if (!isMyAssignedTask) {
         try {
           final bids = await getBids('${offer['_id'] ?? offer['id']}');
@@ -343,7 +346,9 @@ class AuthService {
     );
     final decoded = jsonDecode(response.body);
     if (decoded is! List) throw Exception('Format daftar bid tidak valid.');
-    return decoded.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+    return decoded
+        .map((item) => Map<String, dynamic>.from(item as Map))
+        .toList();
   }
 
   static Future<Map<String, dynamic>> rejectBid(String bidId) async {

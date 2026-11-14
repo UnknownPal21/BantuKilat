@@ -29,8 +29,8 @@ class DetailTawaran extends StatefulWidget {
     required this.addressDetail,
     required this.initialWage,
     this.customerName = "Mr Amba",
-    this.customerAvatar = "assets/logo/LogoBulat.png",
-    this.mapImage = "assets/images/dummy.png",
+    this.customerAvatar = "assets/images/dummy.png",
+    this.mapImage = "assets/images/dummy2.png",
   });
 
   @override
