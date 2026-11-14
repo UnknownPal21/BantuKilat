@@ -17,6 +17,15 @@ class Settings(BaseSettings):
     # base64 di-decode supaya request raksasa tidak mengalokasikan memori.
     media_max_input_chars: int = 8_000_000
     media_max_bytes: int = 6_000_000
+    # URL foto ditandatangani dan kedaluwarsa. GET /media/{id} tanpa tanda
+    # tangan yang sah ditolak, supaya id yang bocor lewat log/riwayat tidak
+    # cukup untuk membuka foto. Response selalu membuat tanda tangan baru,
+    # jadi umur ini hanya membatasi tautan yang sudah terlanjur dibagikan.
+    media_url_ttl_seconds: int = 3600
+    # Batas baca/unggah foto per user per hari. Endpoint baca tanpa auth tidak
+    # boleh jadi alat scraping; batas unggah mencegah M0 penuh oleh satu akun.
+    media_daily_view_limit: int = 600
+    media_daily_upload_limit: int = 60
 
     # Provider AI apa pun yang bicara protokol OpenAI-compatible. Default
     # Gemini; ganti tiga nilai ini untuk pindah ke OpenAI/OpenRouter/Groq
@@ -29,6 +38,15 @@ class Settings(BaseSettings):
     # demo tetap jalan tanpa biaya. Labelnya jujur: model = "local-heuristic".
     ai_allow_local_fallback: bool = True
     ai_daily_message_limit: int = 20
+    # /ai/estimate tidak menyimpan pesan, jadi dihitung terpisah. Tanpa batas
+    # ini satu akun bisa memanggil provider berbayar tanpa henti.
+    ai_daily_estimate_limit: int = 40
+    # Kuota di-reset pada tengah malam zona ini (7 = WIB), bukan 00:00 UTC
+    # yang jatuh jam 07:00 pagi di Indonesia.
+    ai_quota_utc_offset_hours: int = 7
+    # Kuota PUTARAN sendiri: satu putaran percakapan bisa memuat beberapa
+    # gambar, dan biayanya jauh lebih besar daripada teks saja.
+    ai_daily_photo_message_limit: int = 10
     # Jumlah pesan lama yang dikirim ulang sebagai konteks percakapan.
     ai_history_messages: int = 10
 

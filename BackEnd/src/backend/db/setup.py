@@ -242,6 +242,10 @@ async def ensure_ai() -> None:
     await db.ai_messages.create_index(
         [("user_id", 1), ("role", 1), ("created_at", -1)]
     )
+    # Penghitung kuota atomik: satu dokumen per user per hari (WIB).
+    await db.ai_usage.create_index([("user_id", 1), ("day", 1)], unique=True)
+    # Dokumen kuota lama tidak perlu disimpan selamanya.
+    await db.ai_usage.create_index("created_at", expireAfterSeconds=60 * 60 * 24 * 30)
 
 
 async def setup() -> None:

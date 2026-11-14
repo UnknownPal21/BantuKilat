@@ -88,8 +88,9 @@ async def create(user: dict, payload: OfferCreateIn) -> dict:
             422, "CATEGORY_NOT_FOUND", "Kategori tidak ditemukan atau tidak aktif"
         )
 
-    # Setiap id harus ada di collection media dan milik user ini.
-    photos = await media_service.require_owned_photos(user, payload.photos)
+    # Setiap id/URL dinormalisasi ke id, lalu harus ada di collection media
+    # dan milik user ini.
+    photos = await media_service.resolve_photos(user, payload.photos)
 
     now = utcnow()
     address = user.get("address") or {}
@@ -154,6 +155,13 @@ async def get(offer_id: str) -> dict:
 
 
 async def complete(user: dict, offer_id: str) -> dict:
+    """Tandai offer selesai dan catat satu sampel harga.
+
+    Retry aman: kalau pemanggilan pertama sudah mengubah status tapi gagal
+    setelahnya (mis. timeout jaringan), percobaan kedua tidak boleh menjawab
+    409 begitu saja. Kalau offer sudah COMPLETED **oleh teknisi yang sama**,
+    langkah yang belum selesai diulang sampai benar-benar konsisten.
+    """
     oid = offer_id_or_404(offer_id)
     now = utcnow()
 
@@ -177,9 +185,14 @@ async def complete(user: dict, offer_id: str) -> dict:
         if offer is None:
             raise ApiError(404, "OFFER_NOT_FOUND", "Tawaran tidak ditemukan")
         if offer.get("status") == "COMPLETED":
-            raise ApiError(
-                409, "OFFER_ALREADY_COMPLETED", "Tawaran sudah diselesaikan"
-            )
+            if offer.get("technician_id") != user["_id"]:
+                raise ApiError(
+                    409, "OFFER_ALREADY_COMPLETED", "Tawaran sudah diselesaikan"
+                )
+            # Sudah selesai oleh user ini: selesaikan sisa pekerjaan idempoten
+            # (sampel harga & penghitung teknisi) lalu kembalikan apa adanya.
+            await _ensure_completion_side_effects(offer)
+            return _offer_response(offer)
         if offer.get("status") != "ASSIGNED":
             raise ApiError(409, "OFFER_NOT_ASSIGNED", "Tawaran belum ditugaskan")
         raise ApiError(
@@ -188,16 +201,26 @@ async def complete(user: dict, offer_id: str) -> dict:
             "Hanya teknisi yang ditugaskan bisa menyelesaikan",
         )
 
-    # Baru setelah offer benar-benar COMPLETED, naikkan statistik teknisi.
+    # Statistik teknisi hanya naik pada transisi ASSIGNED -> COMPLETED, jadi
+    # letaknya di sini (bukan di _ensure_completion_side_effects) supaya
+    # pemanggilan ulang tidak menghitung dua kali.
     await db.users.update_one(
         {"_id": user["_id"]}, {"$inc": {"tech.completed_count": 1}}
     )
-
-    # Harga deal ikut memperkaya katalog: AI yang sama akan memakai data ini
-    # pada percakapan berikutnya, tanpa ada penulisan manual.
-    await _record_deal_sample(updated)
+    await _ensure_completion_side_effects(updated)
 
     return _offer_response(updated)
+
+
+async def _ensure_completion_side_effects(offer: dict) -> None:
+    """Langkah setelah COMPLETED yang aman diulang.
+
+    Harga deal ikut memperkaya katalog: AI yang sama memakai data ini pada
+    percakapan berikutnya. `record_sample` sudah idempoten lewat unique index
+    parsial `offer_id`, jadi memanggilnya berkali-kali tidak menggandakan
+    sampel.
+    """
+    await _record_deal_sample(offer)
 
 
 async def _record_deal_sample(offer: dict) -> None:

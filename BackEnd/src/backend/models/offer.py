@@ -1,4 +1,3 @@
-import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -12,8 +11,8 @@ OfferStatus = Literal[
     "EXPIRED",
 ]
 
-# photos berisi id media hasil POST /media, bukan path atau data URI.
-_MEDIA_ID = re.compile(r"^[0-9a-fA-F]{24}$")
+# photos berisi id media hasil POST /media (URL /media/<id> juga diterima dan
+# dinormalisasi di service). Data URI ditolak: base64 tidak pernah masuk DB.
 
 
 class OfferCreateIn(BaseModel):
@@ -46,17 +45,14 @@ class OfferCreateIn(BaseModel):
             if not p:
                 continue
             # Jaring terakhir kalau Flutter mengirim data URI langsung ke
-            # endpoint ini: tolak, jangan simpan string megabyte di Mongo.
+            # endpoint ini: tolak sebelum menyimpan string megabyte di Mongo.
+            # Id/URL divalidasi lebih lanjut (dan dinormalisasi) di service.
             if p.startswith("data:") or len(p) > 300:
                 raise ValueError("Foto harus diunggah lewat POST /media")
-            if not _MEDIA_ID.fullmatch(p):
-                raise ValueError("ID foto tidak valid")
-            cleaned.append(p.lower())
+            cleaned.append(p)
 
         if not cleaned:
             raise ValueError("Minimal satu foto")
-        if len(set(cleaned)) != len(cleaned):
-            raise ValueError("Foto tidak boleh duplikat")
         return cleaned
 
 

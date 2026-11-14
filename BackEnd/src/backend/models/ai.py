@@ -96,6 +96,8 @@ class MessageOut(BaseModel):
     photo_relevant: bool | None = None
     model: str | None = None
     error: str | None = None
+    # True = kegagalan sesaat, aman dikirim ulang (tombol "coba lagi").
+    retryable: bool = False
     created_at: str
 
 

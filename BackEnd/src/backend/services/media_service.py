@@ -1,7 +1,11 @@
 import base64
 import binascii
+import hashlib
+import hmac
 import re
+import time
 from io import BytesIO
+from urllib.parse import urlsplit
 
 from bson import Binary, ObjectId
 from bson.errors import InvalidId
@@ -9,8 +13,14 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 
 from backend.core.config import settings
 from backend.core.errors import ApiError
+from backend.core.ratelimit import DayCounter
 from backend.core.timeutils import utcnow
 from backend.db.mongo import db
+
+# Counter di memori: membatasi penyalahgunaan tanpa query Mongo pada setiap
+# GET /media. Kalau nanti lebih dari satu worker, pindahkan ke Redis.
+media_view_counter = DayCounter(settings.ai_quota_utc_offset_hours)
+media_upload_counter = DayCounter(settings.ai_quota_utc_offset_hours)
 
 # Foto disimpan sebagai satu dokumen biner di collection `media`, bukan GridFS:
 # pymongo 4.19 belum menyediakan AsyncGridFSBucket, dan hasil kompresi server
@@ -23,6 +33,9 @@ JPEG_QUALITY = 82
 Image.MAX_IMAGE_PIXELS = 40_000_000
 
 _MEDIA_ID = re.compile(r"^[0-9a-fA-F]{24}$")
+# Path foto di URL: /media/<24 hex>, boleh dengan atau tanpa query
+# (?exp=...&sig=...) karena Flutter sering mengirim balik URL yang diterimanya.
+_MEDIA_PATH = re.compile(r"^/media/([0-9a-fA-F]{24})/?$")
 
 _ALLOWED_PREFIXES = (
     "data:image/jpeg;base64",
@@ -31,14 +44,53 @@ _ALLOWED_PREFIXES = (
     "data:image/webp;base64",
 )
 
+# Urutan membedakan tanda tangan ini dari token JWT yang memakai secret sama.
+_SIGNATURE_CONTEXT = "media-url-v1"
+
 
 def is_media_id(value: str) -> bool:
     return bool(_MEDIA_ID.fullmatch(value))
 
 
-def public_url(file_id: str) -> str:
+def _signature(file_id: str, expires_at: int) -> str:
+    message = f"{_SIGNATURE_CONTEXT}:{file_id}:{expires_at}".encode()
+    digest = hmac.new(
+        settings.jwt_secret.encode(), message, hashlib.sha256
+    ).hexdigest()
+    # 40 hex = 160 bit: cukup untuk mencegah tebak-tebakan, tetap pendek di URL.
+    return digest[:40]
+
+
+def public_url(file_id: str, ttl: int | None = None) -> str:
+    """URL foto bertanda tangan yang kedaluwarsa.
+
+    Tanda tangan dibuat ulang setiap kali response dikirim, jadi UI selalu
+    mendapat tautan segar. Tautan lama yang sudah tersebar mati sendiri.
+    """
+    lifetime = settings.media_url_ttl_seconds if ttl is None else ttl
+    expires_at = int(time.time()) + max(1, lifetime)
+    signature = _signature(file_id, expires_at)
     base = settings.public_base_url.rstrip("/")
-    return f"{base}/media/{file_id}"
+    return f"{base}/media/{file_id}?exp={expires_at}&sig={signature}"
+
+
+def verify_signature(file_id: str, expires_at: int | None, signature: str | None) -> int:
+    """Return sisa detik masa berlaku, atau raise 403.
+
+    Tanpa cek ini, id media (yang bisa muncul di log) cukup untuk membuka
+    foto pribadi user.
+    """
+    if expires_at is None or not signature:
+        raise ApiError(
+            403, "MEDIA_URL_INVALID", "URL foto tidak memiliki tanda tangan"
+        )
+    expected = _signature(file_id, int(expires_at))
+    if not hmac.compare_digest(expected, signature):
+        raise ApiError(403, "MEDIA_URL_INVALID", "Tanda tangan URL foto tidak valid")
+    remaining = int(expires_at) - int(time.time())
+    if remaining <= 0:
+        raise ApiError(403, "MEDIA_URL_EXPIRED", "URL foto sudah kedaluwarsa")
+    return remaining
 
 
 def _decode_data_uri(data: str) -> bytes:
@@ -115,6 +167,14 @@ def probe(data: str) -> dict:
 
 
 async def save_image(user: dict, data: str, kind: str = "offers") -> dict:
+    # Dibatasi SEBELUM decode: satu akun tidak boleh mengisi Atlas M0 dengan
+    # puluhan ribu foto.
+    media_upload_counter.reserve(
+        str(user["_id"]),
+        settings.media_daily_upload_limit,
+        "unggah foto",
+        "MEDIA_RATE_LIMITED",
+    )
     blob = _decode_data_uri(data)
     jpeg, width, height = _normalize(blob)
     now = utcnow()
@@ -184,6 +244,54 @@ async def load_blobs(photo_ids: list[str]) -> list[bytes]:
             raise ApiError(422, "PHOTO_NOT_FOUND", "Foto tidak ditemukan")
         blobs.append(blob)
     return blobs
+
+
+def normalize_ref(value: str) -> str:
+    """Terima id media **atau** URL /media/<id>, kembalikan id 24 hex.
+
+    Flutter sering mengirim balik URL yang diterima dari response sebelumnya,
+    lengkap dengan ?exp=&sig=. Kalau string mentah itu disimpan, tanda
+    tangannya ikut mati saat kedaluwarsa dan foto tidak bisa dibuka lagi.
+    """
+    raw = (value or "").strip()
+    if is_media_id(raw):
+        return raw.lower()
+
+    if raw.lower().startswith("data:"):
+        # Keputusan desain: base64 tidak pernah masuk DB. Pesan/offer hanya
+        # menyimpan id, jadi client wajib upload dulu ke POST /media.
+        raise ApiError(
+            422,
+            "PHOTO_NOT_UPLOADED",
+            "Unggah foto lewat POST /media, lalu kirim id atau URL-nya",
+        )
+
+    parts = urlsplit(raw)
+    # Host tidak diperiksa: yang diambil hanya id-nya, lalu kepemilikan tetap
+    # divalidasi. Yang penting path-nya memang /media/<24 hex>.
+    match = _MEDIA_PATH.fullmatch(parts.path)
+    if match:
+        return match.group(1).lower()
+
+    raise ApiError(
+        422,
+        "PHOTO_REF_INVALID",
+        "Foto harus berupa id media atau URL /media/<id>",
+    )
+
+
+def normalize_refs(values: list[str]) -> list[str]:
+    ids = [normalize_ref(value) for value in values]
+    if len(set(ids)) != len(ids):
+        raise ApiError(422, "VALIDATION_ERROR", "Foto tidak boleh duplikat")
+    return ids
+
+
+async def resolve_photos(user: dict, refs: list[str]) -> list[str]:
+    """Normalisasi id/URL lalu pastikan semuanya milik user ini."""
+    if not refs:
+        return []
+    return await require_owned_photos(user, normalize_refs(refs))
 
 
 async def require_owned_photos(user: dict, photo_ids: list[str]) -> list[str]:

@@ -68,12 +68,29 @@ _ALLOWED_SEVERITY = {"RINGAN", "SEDANG", "BERAT"}
 
 # Dipakai hanya kalau AI_API_KEY kosong atau provider sedang mati. Tidak
 # menggantikan model, tapi cukup untuk demo: klasifikasi dari kata kunci.
+# Urutan penting: kategori pertama yang menang saat jumlah kemunculan sama
+# (mis. "ban" di kendaraan mengalahkan "bocor" di air).
 _KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
     (
-        "PLUMBING",
+        "VEHICLE",
         (
-            "kran", "pipa", "bocor", "air", "wastafel", "toilet", "kloset",
-            "saluran", "mampet", "toren", "shower", "drat", "paralon", "keran",
+            "motor", "mobil", "ban", "tubeless", "aki", "rem", "mesin",
+            "rantai", "bensin", "kopling", "stir", "velg",
+        ),
+    ),
+    (
+        "MOVING",
+        (
+            "angkut", "angkutkan", "pindah", "pindahan", "pindahkan",
+            "kasur", "lemari", "gas elpiji", "tabung gas", "angkat barang",
+        ),
+    ),
+    (
+        "TECH",
+        (
+            "ac", "laptop", "komputer", "printer", "router", "wifi", "tv",
+            "kulkas", "mesin cuci", "elektronik", "hp", "handphone", "remote",
+            "charger", "adaptor", "bau gosong", "mati mendadak",
         ),
     ),
     (
@@ -81,39 +98,48 @@ _KEYWORDS: list[tuple[str, tuple[str, ...]]] = [
         (
             "listrik", "kabel", "saklar", "mcb", "korslet", "konslet", "lampu",
             "bohlam", "stopkontak", "stop kontak", "setrum", "sekring", "kipas",
+            "silau", "fiting",
         ),
     ),
     (
-        "VEHICLE",
-        ("motor", "mobil", "ban", "aki", "rem", "mesin", "rantai", "bensin", "kopling"),
-    ),
-    (
-        "MOVING",
-        ("angkut", "pindah", "gas", "kasur", "lemari", "pindahan", "pindahkan"),
-    ),
-    (
-        "TECH",
+        "CARPENTRY",
         (
-            "ac", "laptop", "printer", "router", "wifi", "tv", "kulkas",
-            "mesin cuci", "elektronik", "hp", "komputer", "remote",
+            "pagar", "kayu", "kunci", "engsel", "pintu", "rak", "lemari kayu",
+            "pertukangan", "cat dinding", "meja",
+        ),
+    ),
+    (
+        "PLUMBING",
+        (
+            "kran", "keran", "pipa", "bocor", "wastafel", "toilet", "kloset",
+            "saluran", "mampet", "toren", "shower", "drat", "paralon",
+            "pompa air", "kamar mandi",
         ),
     ),
 ]
 
 _HEAVY = (
     "meluap", "deras", "terbakar", "korsleting", "ambruk", "roboh", "darurat",
-    "besar", "total", "patah", "pecah", "bau gas", "asap",
+    "besar", "total", "patah", "pecah", "bau gas", "asap", "bau gosong",
+    "gosong",
 )
 _LIGHT = ("menetes", "longgar", "ganti bohlam", "kecil", "sedikit", "kadang")
+
+
+def _contains_word(text: str, word: str) -> bool:
+    return re.search(rf"(?<![a-z]){re.escape(word)}(?![a-z])", text) is not None
 
 
 def _heuristic(text: str) -> dict:
     lowered = text.lower()
 
     category_code = "OTHER"
+    # Kategori dengan kemunculan terbanyak menang; seri dimenangkan yang lebih
+    # dulu di _KEYWORDS. Hanya satuan kata utuh ("ac" tidak cocok dengan
+    # "baca"), karena "ac" di dalam kata lain menyesatkan.
     best = 0
     for code, words in _KEYWORDS:
-        hits = sum(1 for word in words if word in lowered)
+        hits = sum(1 for word in words if _contains_word(lowered, word))
         if hits > best:
             best, category_code = hits, code
 

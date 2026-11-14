@@ -1,9 +1,10 @@
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from bson import ObjectId
 from bson.errors import InvalidId
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 
 from backend.core.config import settings
 from backend.core.errors import ApiError
@@ -23,6 +24,10 @@ _SEVERITY_TEXT = {
     "SEDANG": "sedang",
     "BERAT": "serius",
 }
+
+# Error yang layak dicoba ulang tanpa user mengetik ulang pesan: gangguan
+# sesaat pada provider, bukan kesalahan input user.
+_RETRYABLE_ERRORS = {"AI_UNAVAILABLE", "AI_BAD_RESPONSE"}
 
 # Baris keselamatan hanya untuk dua kategori ini; kategori lain tidak punya
 # risiko yang cukup jelas untuk diberi instruksi umum.
@@ -302,9 +307,21 @@ async def _classify(
 
 async def estimate(user: dict, payload: EstimateIn) -> dict:
     """Coba klasifikasi + harga tanpa menyimpan pesan (untuk menyetel prompt)."""
-    has_photos = bool(payload.photos)
-    result, category, severity = await _classify(user, payload.text, payload.photos)
+    # Foto dinormalisasi dulu: id dan URL /media/<id> sama-sama diterima,
+    # data URI mentah ditolak sebelum biaya provider keluar.
+    photo_ids = await media_service.resolve_photos(user, payload.photos)
+    has_photos = bool(photo_ids)
+
+    await _reserve_quota(
+        user,
+        "estimate",
+        settings.ai_daily_estimate_limit,
+        label="estimasi",
+    )
+    result, category, severity = await _classify(user, payload.text, photo_ids)
     if result.get("error"):
+        # Kuota dikembalikan: user tidak mendapat jawaban apa pun.
+        await _refund_quota(user, "estimate")
         return {
             "text": "Asisten sedang sibuk, coba lagi sebentar lagi.",
             "estimate": None,
@@ -361,6 +378,10 @@ def _message_response(doc: dict) -> dict:
         "photo_relevant": doc.get("photo_relevant"),
         "model": doc.get("model"),
         "error": doc.get("error"),
+        # Kegagalan sesaat (provider mati/terpotong) boleh dicoba ulang tanpa
+        # mengetik ulang: UI tinggal menekan tombol coba lagi.
+        "retryable": doc.get("role") == "ASSISTANT"
+        and doc.get("error") in _RETRYABLE_ERRORS,
         "created_at": iso_utc(doc["created_at"]),
     }
 
@@ -429,23 +450,78 @@ async def get_chat(
     return {"conversation": _chat_response(doc), "messages": messages}
 
 
-async def _check_daily_limit(user: dict) -> None:
-    start = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
-    used = await db.ai_messages.count_documents(
-        {
-            "user_id": user["_id"],
-            "role": "USER",
-            # created_at dari pymongo naive; bandingkan sebagai UTC naive
-            # supaya tidak meleset 7 jam seperti kalau pakai waktu lokal.
-            "created_at": {"$gte": start.replace(tzinfo=None)},
-        }
-    )
-    if used >= settings.ai_daily_message_limit:
-        raise ApiError(
-            429,
-            "AI_RATE_LIMITED",
-            f"Batas {settings.ai_daily_message_limit} pesan per hari sudah tercapai",
+def _quota_day() -> str:
+    """Tanggal kuota menurut zona user (default WIB), bukan UTC.
+
+    Tanpa offset ini jatah harian baru terbuka jam 07:00 pagi waktu Indonesia.
+    """
+    offset = timedelta(hours=settings.ai_quota_utc_offset_hours)
+    return (utcnow() + offset).strftime("%Y-%m-%d")
+
+
+async def _reserve_quota(
+    user: dict, field: str, limit: int, *, code: str = "AI_RATE_LIMITED", label: str = "pesan"
+) -> None:
+    """Ambil satu jatah secara atomik, atau 429 kalau sudah habis.
+
+    Increment dilakukan dalam satu operasi supaya dua request bersamaan tidak
+    bisa sama-sama lolos seperti pada pola hitung-lalu-insert sebelumnya.
+    """
+    if limit <= 0:
+        return
+
+    now = utcnow()
+    try:
+        await db.ai_usage.update_one(
+            {
+                "user_id": user["_id"],
+                "day": _quota_day(),
+                # $exists: dokumen dibuat oleh jenis kuota lain (mis. chat
+                # lebih dulu) tidak punya field ini, dan $lt saja tidak
+                # cocok untuk field yang belum ada.
+                "$or": [
+                    {field: {"$lt": limit}},
+                    {field: {"$exists": False}},
+                ],
+            },
+            {
+                "$inc": {field: 1},
+                "$set": {"updated_at": now},
+                "$setOnInsert": {"created_at": now},
+            },
+            upsert=True,
         )
+    except DuplicateKeyError as exc:
+        # Filter tidak cocok (kuota penuh) -> upsert mencoba insert dokumen
+        # baru -> unique index (user_id, day) menolaknya.
+        raise ApiError(
+            429, code, f"Batas {limit} {label} per hari sudah tercapai"
+        ) from exc
+
+
+async def _refund_quota(user: dict, field: str) -> None:
+    await db.ai_usage.update_one(
+        {"user_id": user["_id"], "day": _quota_day(), field: {"$gt": 0}},
+        {"$inc": {field: -1}},
+    )
+
+
+async def purge_orphan_media(grace_seconds: int = 24 * 3600, limit: int = 500) -> int:
+    """Hapus foto yang diunggah tapi tidak pernah dipakai offer/chat.
+
+    Foto yatim muncul saat user memilih foto lalu batal. `used_at` diisi saat
+    offer disimpan atau pesan AI berfoto dikirim, jadi yang masih null setelah
+    masa tenggang aman dihapus.
+    """
+    cutoff = utcnow() - timedelta(seconds=grace_seconds)
+    cursor = db.media.find(
+        {"used_at": None, "created_at": {"$lt": cutoff}}, {"_id": 1}
+    ).limit(limit)
+    ids = [doc["_id"] async for doc in cursor]
+    if not ids:
+        return 0
+    result = await db.media.delete_many({"_id": {"$in": ids}, "used_at": None})
+    return result.deleted_count
 
 
 async def _history(conversation_id: ObjectId) -> list[dict]:
@@ -464,9 +540,20 @@ async def send_message(user: dict, chat_id: str, payload: MessageIn) -> dict:
     if chat.get("status") == "CLOSED":
         raise ApiError(409, "CHAT_CLOSED", "Percakapan sudah ditutup")
 
-    await _check_daily_limit(user)
-    if payload.photos:
-        await media_service.require_owned_photos(user, payload.photos)
+    # Foto dinormalisasi & divalidasi SEBELUM kuota diambil: request yang
+    # fotonya salah tidak boleh memakan jatah harian.
+    photo_ids = await media_service.resolve_photos(user, payload.photos)
+    await _reserve_quota(user, "chat", settings.ai_daily_message_limit)
+    if photo_ids:
+        # Putaran bergambar dibatasi terpisah: beberapa gambar per pesan
+        # membuat biaya provider jauh melampaui chat teks.
+        await _reserve_quota(
+            user,
+            "chat_photo",
+            settings.ai_daily_photo_message_limit,
+            code="AI_PHOTO_RATE_LIMITED",
+            label="pesan berfoto",
+        )
 
     # Diambil SEBELUM pesan baru disimpan, kalau tidak pesan yang sama muncul
     # dua kali di prompt (sekali sebagai riwayat, sekali sebagai cerita baru).
@@ -478,7 +565,8 @@ async def send_message(user: dict, chat_id: str, payload: MessageIn) -> dict:
         "user_id": user["_id"],
         "role": "USER",
         "text": payload.text,
-        "photos": payload.photos,
+        # Hanya id: URL bertanda tangan akan mati saat kedaluwarsa.
+        "photos": photo_ids,
         "estimate": None,
         "model": None,
         "error": None,
@@ -488,18 +576,22 @@ async def send_message(user: dict, chat_id: str, payload: MessageIn) -> dict:
     user_doc["_id"] = user_result.inserted_id
 
     result, category, severity = await _classify(
-        user, payload.text, payload.photos, history
+        user, payload.text, photo_ids, history
     )
 
     city = chat.get("city") or (user.get("address") or {}).get("city")
     if result.get("error"):
+        # User tidak mendapat jawaban -> jatah tidak dipotong.
+        await _refund_quota(user, "chat")
+        if photo_ids:
+            await _refund_quota(user, "chat_photo")
         assistant_text = "Asisten sedang sibuk, coba lagi sebentar lagi."
         block = None
         photo_relevant = None
         model = result.get("model")
     else:
         assistant_text, block, photo_relevant = await _reply(
-            result, category, severity, city, bool(payload.photos)
+            result, category, severity, city, bool(photo_ids)
         )
         model = result.get("model")
 
