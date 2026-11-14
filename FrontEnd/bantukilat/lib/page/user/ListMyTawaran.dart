@@ -7,7 +7,21 @@ import 'package:flutter/material.dart';
 // ============================================================================
 // 1. DEFINISI STATUS TAWARAN SAYA (ENUM)
 // ============================================================================
-enum MyOfferStatus { pengerjaan, menunggu, selesai }
+enum MyOfferStatus { pengerjaan, ditawar, menunggu, selesai }
+
+class OfferTechnicianBid {
+  final Map<String, dynamic> bid;
+  final String name;
+  final int amount;
+  final String? message;
+
+  const OfferTechnicianBid({
+    required this.bid,
+    required this.name,
+    required this.amount,
+    this.message,
+  });
+}
 
 // ============================================================================
 // 2. DEFINISI KATEGORI KERUSAKAN & KONFIGURASI WARNANYA
@@ -103,6 +117,8 @@ class MyOfferItem {
   final String description;
   String previewImage;
   final String addressDetail;
+  final String apiStatus;
+  final List<OfferTechnicianBid> pendingBids;
 
   MyOfferItem({
     required this.id,
@@ -115,6 +131,8 @@ class MyOfferItem {
     required this.description,
     this.previewImage = 'assets/images/dummy.png',
     this.addressDetail = '',
+    this.apiStatus = 'WAITING',
+    this.pendingBids = const [],
   });
 }
 
@@ -141,6 +159,35 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
     _loadOffers();
   }
 
+  bool _isUpdatingBid = false;
+
+  Future<void> _respondToBid({
+    required String bidId,
+    required bool accept,
+  }) async {
+    if (_isUpdatingBid) return;
+    setState(() => _isUpdatingBid = true);
+    try {
+      if (accept) {
+        await AuthService.acceptBid(bidId);
+      } else {
+        await AuthService.rejectBid(bidId);
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(accept ? 'Tawaran teknisi diterima.' : 'Tawaran teknisi ditolak.')),
+      );
+      await _loadOffers();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+      );
+    } finally {
+      if (mounted) setState(() => _isUpdatingBid = false);
+    }
+  }
+
   Future<void> _loadOffers() async {
     setState(() {
       _isLoading = true;
@@ -150,7 +197,24 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
       final offers = await AuthService.getMyOffers();
       final items = <MyOfferItem>[];
       for (final offer in offers) {
-        final item = _offerFromJson(offer);
+        List<OfferTechnicianBid> pendingBids = [];
+        try {
+          final rawBids = await AuthService.getOfferBidsByStatus(
+            '${offer['_id']}',
+            'PENDING',
+          );
+          pendingBids = await _bidItems(rawBids);
+        } catch (_) {}
+        if (pendingBids.isEmpty) {
+          try {
+            final rawBids = await AuthService.getOfferBidsByStatus(
+              '${offer['_id']}',
+              'COUNTERED',
+            );
+            pendingBids = await _bidItems(rawBids);
+          } catch (_) {}
+        }
+        final item = _offerFromJson(offer, pendingBids: pendingBids);
         if (item.previewImage != 'assets/images/dummy.png') {
           try {
             final resolved = await AuthService.getMediaUrl(item.previewImage);
@@ -177,11 +241,35 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
     }
   }
 
-  MyOfferItem _offerFromJson(Map<String, dynamic> offer) {
+  Future<List<OfferTechnicianBid>> _bidItems(
+    List<Map<String, dynamic>> bids,
+  ) async {
+    final items = <OfferTechnicianBid>[];
+    for (final bid in bids) {
+      var technicianName = '${(bid['technician_snapshot'] as Map?)?['name'] ?? ''}';
+      final amount = bid['amount'] is num
+          ? (bid['amount'] as num).toInt()
+          : int.tryParse('${bid['amount']}') ?? 0;
+      items.add(OfferTechnicianBid(
+        bid: bid,
+        name: technicianName.isEmpty ? 'Teknisi' : technicianName,
+        amount: amount,
+        message: bid['message'] as String?,
+      ));
+    }
+    return items;
+  }
+
+  MyOfferItem _offerFromJson(
+    Map<String, dynamic> offer, {
+    required List<OfferTechnicianBid> pendingBids,
+  }) {
     final status = '${offer['status'] ?? ''}'.toUpperCase();
     final state = switch (status) {
-      'ASSIGNED' || 'NEGOTIATING' => MyOfferStatus.pengerjaan,
       'COMPLETED' => MyOfferStatus.selesai,
+      'ASSIGNED' => MyOfferStatus.pengerjaan,
+      _ when pendingBids.isNotEmpty || status == 'NEGOTIATING' =>
+        MyOfferStatus.ditawar,
       _ => MyOfferStatus.menunggu,
     };
     final category = Map<String, dynamic>.from(
@@ -203,6 +291,8 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
       description: '${offer['description'] ?? ''}',
       previewImage: photos.isEmpty ? 'assets/images/dummy.png' : photos.first,
       addressDetail: '${offer['address_text'] ?? ''}',
+      apiStatus: status,
+      pendingBids: pendingBids,
     );
   }
 
@@ -305,6 +395,7 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
   @override
   Widget build(BuildContext context) {
     final int countPengerjaan = _countByStatus(MyOfferStatus.pengerjaan);
+    final int countDitawar = _countByStatus(MyOfferStatus.ditawar);
     final int countMenunggu = _countByStatus(MyOfferStatus.menunggu);
     final int countSelesai = _countByStatus(MyOfferStatus.selesai);
 
@@ -351,6 +442,13 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
                                   label: "PENGERJAAN",
                                   bgColor: Color(0xffffdcd8),
                                   textColor: Color(0xffba1a1a),
+                                  rightPadding: 10,
+                                ),
+                                _buildSummaryBox(
+                                  count: countDitawar,
+                                  label: "DITAWAR",
+                                  bgColor: const Color(0xfffff1c2),
+                                  textColor: const Color(0xff664900),
                                   rightPadding: 10,
                                 ),
                                 _buildSummaryBox(
@@ -403,6 +501,13 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
                                     () => _selectedFilter =
                                         MyOfferStatus.pengerjaan,
                                   );
+                                },
+                              ),
+                              _buildFilterTab(
+                                label: "Ditawar ($countDitawar)",
+                                isSelected: _selectedFilter == MyOfferStatus.ditawar,
+                                onTap: () {
+                                  setState(() => _selectedFilter = MyOfferStatus.ditawar);
                                 },
                               ),
                               _buildFilterTab(
@@ -481,6 +586,16 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
                               description: item.description,
                               previewImage: item.previewImage,
                               addressDetail: item.addressDetail,
+                              pendingBids: item.pendingBids,
+                              onAcceptBid: (bidId) => _respondToBid(
+                                bidId: bidId,
+                                accept: true,
+                              ),
+                              onRejectBid: (bidId) => _respondToBid(
+                                bidId: bidId,
+                                accept: false,
+                              ),
+                              isBidActionLoading: _isUpdatingBid,
                             ),
                           );
                         }).toList(),
@@ -629,6 +744,10 @@ class MyTawaranCardWidget extends StatelessWidget {
   final String description;
   final String previewImage;
   final String addressDetail;
+  final List<OfferTechnicianBid> pendingBids;
+  final ValueChanged<String> onAcceptBid;
+  final ValueChanged<String> onRejectBid;
+  final bool isBidActionLoading;
 
   const MyTawaranCardWidget({
     Key? key,
@@ -643,6 +762,10 @@ class MyTawaranCardWidget extends StatelessWidget {
     required this.description,
     this.previewImage = 'assets/images/dummy.png',
     this.addressDetail = '',
+    this.pendingBids = const [],
+    required this.onAcceptBid,
+    required this.onRejectBid,
+    this.isBidActionLoading = false,
   }) : super(key: key);
 
   // Format angka integer ke Rupiah (contoh: 50000 -> Rp 50.000)
@@ -662,7 +785,7 @@ class MyTawaranCardWidget extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // 1. Konfigurasi warna garis atas & badge berdasarkan status (Pengerjaan, Menunggu, Selesai)
+    // 1. Konfigurasi warna garis atas & badge berdasarkan status (Pengerjaan, Ditawar, Menunggu, Selesai)
     Color topBarColor;
     Color statusBadgeBgColor;
     Color statusDotColor;
@@ -676,6 +799,13 @@ class MyTawaranCardWidget extends StatelessWidget {
         statusDotColor = Color(0xffbe0011);
         statusTextColor = Color(0xff430002);
         statusText = "PENGERJAAN";
+        break;
+      case MyOfferStatus.ditawar:
+        topBarColor = const Color(0xffe6a700);
+        statusBadgeBgColor = const Color(0xfffff1c2);
+        statusDotColor = const Color(0xffad7b00);
+        statusTextColor = const Color(0xff664900);
+        statusText = 'DITAWAR (${pendingBids.length})';
         break;
       case MyOfferStatus.menunggu:
         topBarColor = Color(0xFF9EA5D9); // Garis selaras tema Menunggu (F2F3FF)
@@ -899,6 +1029,88 @@ class MyTawaranCardWidget extends StatelessWidget {
                     ],
                   ),
                 ),
+
+                if (status == MyOfferStatus.ditawar && pendingBids.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.only(top: 10),
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xfffff7df),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Penawaran teknisi (${pendingBids.length})',
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w700,
+                            fontSize: 13,
+                            color: Color(0xff664900),
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        ...pendingBids.map((offerBid) {
+                          final bid = offerBid.bid;
+                          final tech = Map<String, dynamic>.from(
+                            (bid['technician_snapshot'] as Map?) ?? const {},
+                          );
+                          final bidAmount = offerBid.amount;
+                          final bidId = '${bid['_id'] ?? bid['id'] ?? ''}';
+                          final message = offerBid.message;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 8),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${tech['name'] ?? 'Teknisi'} menawarkan ${_formatRupiah(bidAmount)}',
+                                  style: const TextStyle(
+                                    fontSize: 12,
+                                    color: Color(0xff292b33),
+                                  ),
+                                ),
+                                if ((bid['message'] as String?)?.isNotEmpty == true)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 3),
+                                    child: Text(
+                                      bid['message'] as String,
+                                      style: const TextStyle(fontSize: 11),
+                                    ),
+                                  ),
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: isBidActionLoading
+                                            ? null
+                                            : () => onRejectBid(bidId),
+                                        child: const Text('Tolak'),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: ElevatedButton(
+                                        onPressed: isBidActionLoading
+                                            ? null
+                                            : () => onAcceptBid(bidId),
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: const Color(0xff006747),
+                                          foregroundColor: Colors.white,
+                                        ),
+                                        child: const Text('Terima'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
+                      ],
+                    ),
+                  ),
 
                 // Tombol Detail
                 Padding(

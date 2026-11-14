@@ -180,7 +180,9 @@ class _ListTawaranPageState extends State<ListTawaranPage> {
         limit: 50,
       );
       final items = <OfferItem>[];
-      for (final offer in offers) {
+      for (final offer in offers.where(
+        (item) => '${item['status']}'.toUpperCase() == 'WAITING',
+      )) {
         final item = await _offerFromJson(offer);
         items.add(item);
       }
@@ -205,8 +207,7 @@ class _ListTawaranPageState extends State<ListTawaranPage> {
       (offer['category_snapshot'] as Map?) ?? const {},
     );
     final label = '${category['label'] ?? category['name'] ?? 'Lainnya'}';
-    final status = '${offer['status'] ?? ''}'.toUpperCase();
-    final state = status == 'ASSIGNED' || status == 'COMPLETED'
+    final state = offer['is_sos'] == true
         ? OfferCategory.darurat
         : _categoryFromName(label);
     final requester = Map<String, dynamic>.from(

@@ -25,7 +25,7 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
   bool isSiagaAktif = true;
 
   // 2. State Kartu Darurat (Bisa di-slide 2 gambar & hilang saat klik Tolak)
-  bool _showEmergencyCard = true;
+  bool _showEmergencyCard = false;
   int _emergencySlideIndex = 0;
 
   // Alamat di Kartu Darurat yang digunakan bersama oleh teks, slide peta ke-2, dan halaman DetailTawaran
@@ -74,7 +74,10 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
         longitude: lng,
         limit: 20,
       );
-      final items = offers.map(_offerToHomeCard).toList();
+      final items = offers
+          .where((offer) => '${offer['status']}'.toUpperCase() == 'WAITING')
+          .map(_offerToHomeCard)
+          .toList();
       if (!mounted) return;
       setState(() {
         _daftarTawaranSekitar

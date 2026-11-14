@@ -32,7 +32,7 @@ class AuthService {
     bool termsAccepted = false,
   }) async {
     final body = <String, dynamic>{
-      'role': role,
+      'role': role.toUpperCase(),
       'name': name,
       'email': email,
       'phone': phone,
@@ -40,7 +40,8 @@ class AuthService {
       'city': city,
       'district': district,
       'terms_accepted': termsAccepted,
-      if (skills != null) 'skills': skills,
+      if (skills != null)
+        'skills': skills.map((skill) => skill.toUpperCase()).toList(),
     };
     final response = await http.post(
       Uri.parse('$_baseUrl/auth/register'),
@@ -130,10 +131,11 @@ class AuthService {
 
   static Future<List<Map<String, dynamic>>> getMyOffers({
     int limit = 50,
+    String? status,
   }) async {
     final response = await _authorizedRequest(
       'GET',
-      '/offers/mine?limit=$limit',
+      '/offers/mine?limit=$limit${status == null ? '' : '&status=${Uri.encodeQueryComponent(status)}'}',
     );
     final decoded = jsonDecode(response.body);
     if (decoded is! List) throw Exception('Format daftar tawaran tidak valid.');
@@ -257,26 +259,43 @@ class AuthService {
     final profile = await getCurrentUser();
     final technicianId = profile?['_id']?.toString();
     if (technicianId == null) return [];
+    
+    // 1. Ambil tawaran sekitar/semua tawaran status WAITING, ASSIGNED, COMPLETED, dll
     final offers = await getNearbyOffers(
       latitude: latitude,
       longitude: longitude,
-      radius: 50000,
-      limit: limit,
+      radius: 500000,
+      limit: 200,
     );
-    final assigned = offers.where((offer) {
-      return offer['technician_id']?.toString() == technicianId &&
-          '${offer['status']}'.toUpperCase() == 'ASSIGNED';
-    }).toList();
-    for (final offer in assigned) {
-      try {
-        final bids = await getBids('${offer['_id']}');
-        final accepted = bids.where(
-          (bid) =>
-              bid['technician_id']?.toString() == technicianId &&
-              '${bid['status']}'.toUpperCase() == 'ACCEPTED',
-        );
-        if (accepted.isNotEmpty) offer['accepted_bid'] = accepted.first;
-      } catch (_) {}
+
+    final assigned = <Map<String, dynamic>>[];
+    for (final offer in offers) {
+      final status = '${offer['status'] ?? ''}'.toUpperCase();
+      final tId = offer['technician_id']?.toString();
+      
+      bool isMyAssignedTask = tId == technicianId && (status == 'ASSIGNED' || status == 'COMPLETED');
+      
+      if (!isMyAssignedTask) {
+        try {
+          final bids = await getBids('${offer['_id'] ?? offer['id']}');
+          final accepted = bids.where(
+            (bid) =>
+                (bid['technician_id']?.toString() == technicianId ||
+                    (bid['technician_snapshot'] as Map?)?['_id']?.toString() ==
+                        technicianId) &&
+                '${bid['status']}'.toUpperCase() == 'ACCEPTED',
+          );
+          if (accepted.isNotEmpty) {
+            isMyAssignedTask = true;
+            offer['accepted_bid'] = accepted.first;
+            offer['status'] = 'ASSIGNED';
+          }
+        } catch (_) {}
+      }
+
+      if (isMyAssignedTask) {
+        assigned.add(offer);
+      }
     }
     return assigned;
   }
@@ -310,6 +329,27 @@ class AuthService {
       'POST',
       '/offers/${Uri.encodeComponent(offerId)}/bids',
       body: {'amount': amount, if (message != null) 'message': message},
+    );
+    return Map<String, dynamic>.from(jsonDecode(response.body) as Map);
+  }
+
+  static Future<List<Map<String, dynamic>>> getOfferBidsByStatus(
+    String offerId,
+    String status,
+  ) async {
+    final response = await _authorizedRequest(
+      'GET',
+      '/offers/${Uri.encodeComponent(offerId)}/bids?status=${Uri.encodeQueryComponent(status)}&limit=100',
+    );
+    final decoded = jsonDecode(response.body);
+    if (decoded is! List) throw Exception('Format daftar bid tidak valid.');
+    return decoded.map((item) => Map<String, dynamic>.from(item as Map)).toList();
+  }
+
+  static Future<Map<String, dynamic>> rejectBid(String bidId) async {
+    final response = await _authorizedRequest(
+      'POST',
+      '/bids/${Uri.encodeComponent(bidId)}/reject',
     );
     return Map<String, dynamic>.from(jsonDecode(response.body) as Map);
   }

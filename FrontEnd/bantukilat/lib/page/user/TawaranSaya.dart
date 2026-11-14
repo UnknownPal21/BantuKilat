@@ -41,7 +41,8 @@ class _TawaranSayaState extends State<TawaranSaya> {
     {'name': 'Bantuan Lainnya', 'icon': Icons.handyman_rounded},
   ];
 
-  // Menyimpan daftar nama kategori yang sedang dipilih
+  // Single category selection for one offer.
+  String? _selectedCategoryLabel;
   final List<String> _selectedCategories = [];
 
   // State Lokasi GPS
@@ -67,19 +68,18 @@ class _TawaranSayaState extends State<TawaranSaya> {
       if (!mounted) return;
       setState(() {
         _apiCategories = categories;
-        for (final category in categories) {
-          if (_selectedCategories.contains(category['label'])) {
-            _selectedCategoryId = category['_id'] as String;
-            break;
+        if (_apiCategories.isNotEmpty) {
+          final first = _apiCategories.first;
+          _selectedCategoryId = first['_id'] as String?;
+          _selectedCategoryLabel = first['label'] as String? ?? first['name'] as String?;
+          if (_selectedCategoryLabel != null) {
+            _selectedCategories
+              ..clear()
+              ..add(_selectedCategoryLabel!);
           }
         }
-        if (_selectedCategoryId == null && categories.isNotEmpty) {
-          _selectedCategoryId = categories.first['_id'] as String;
-        }
       });
-    } catch (_) {
-      // Keep form usable and show error when user submits.
-    }
+    } catch (_) {}
   }
 
   Future<void> _submitOffer(int totalEstimation) async {
@@ -360,7 +360,7 @@ class _TawaranSayaState extends State<TawaranSaya> {
                               ),
                               SizedBox(height: 2),
                               Text(
-                                "Ketuk untuk menambah atau membatalkan pilihan",
+                                "Pilih satu jenis kerusakan untuk tawaran ini",
                                 style: TextStyle(
                                   fontSize: 11,
                                   color: Color(0xff717e76),
@@ -375,47 +375,34 @@ class _TawaranSayaState extends State<TawaranSaya> {
                     Flexible(
                       child: SingleChildScrollView(
                         child: Column(
-                          children: _allCategories.map((cat) {
-                            final String name = cat['name'];
-                            final IconData icon = cat['icon'];
-                            final bool isSelected = _selectedCategories
-                                .contains(name);
+                          children: (_apiCategories.isNotEmpty
+                                  ? _apiCategories
+                                  : [
+                                      {'label': 'Kelistrikan', '_id': 'dummy_1'},
+                                      {'label': 'Air', '_id': 'dummy_2'},
+                                      {'label': 'Atap & Dinding', '_id': 'dummy_3'},
+                                      {'label': 'Kunci & Pintu', '_id': 'dummy_4'},
+                                      {'label': 'Teknologi', '_id': 'dummy_5'},
+                                      {'label': 'Kendaraan', '_id': 'dummy_6'},
+                                      {'label': 'Angkut Barang', '_id': 'dummy_7'},
+                                      {'label': 'Bantuan Lainnya', '_id': 'dummy_8'},
+                                    ])
+                              .map((apiCat) {
+                            final String name =
+                                apiCat['label'] ?? apiCat['name'] ?? '';
+                            final String catId = apiCat['_id'] ?? '';
+                            final bool isSelected =
+                                _selectedCategoryId == catId ||
+                                    _selectedCategoryLabel == name;
 
                             return GestureDetector(
                               onTap: () {
                                 setState(() {
-                                  if (isSelected) {
-                                    _selectedCategories.remove(name);
-                                    _selectedCategoryId = null;
-                                  } else {
-                                    _selectedCategories
-                                      ..clear()
-                                      ..add(name);
-                                    final normalized = name
-                                        .toLowerCase()
-                                        .replaceAll(RegExp(r'[^a-z0-9]'), '');
-                                    final apiCategory = _apiCategories.where((
-                                      item,
-                                    ) {
-                                      final label = '${item['label'] ?? ''}'
-                                          .toLowerCase()
-                                          .replaceAll(RegExp(r'[^a-z0-9]'), '');
-                                      final skill =
-                                          '${item['skill_label'] ?? ''}'
-                                              .toLowerCase()
-                                              .replaceAll(
-                                                RegExp(r'[^a-z0-9]'),
-                                                '',
-                                              );
-                                      return label == normalized ||
-                                          skill == normalized ||
-                                          (name == 'Air' &&
-                                              (label.contains('air') ||
-                                                  skill.contains('air')));
-                                    }).firstOrNull;
-                                    _selectedCategoryId =
-                                        apiCategory?['_id'] as String?;
-                                  }
+                                  _selectedCategoryId = catId;
+                                  _selectedCategoryLabel = name;
+                                  _selectedCategories
+                                    ..clear()
+                                    ..add(name);
                                 });
                                 setModalState(() {});
                               },
@@ -449,7 +436,7 @@ class _TawaranSayaState extends State<TawaranSaya> {
                                         borderRadius: BorderRadius.circular(10),
                                       ),
                                       child: Icon(
-                                        icon,
+                                        Icons.handyman_rounded,
                                         size: 18,
                                         color: isSelected
                                             ? Colors.white

@@ -54,7 +54,12 @@ class _RegisterTeknisiState extends State<RegisterTeknisi> {
         password: _passwordController.text,
         city: _kotaController.text.trim(),
         district: _kecamatanController.text.trim(),
-        skills: _selectedSkills.toList(),
+        skills: _skillCategories
+            .where(
+              (category) => _selectedSkills.contains('${category['code']}'),
+            )
+            .map((category) => '${category['code']}')
+            .toList(),
         termsAccepted: true,
       );
       if (!mounted) return;
@@ -89,9 +94,51 @@ class _RegisterTeknisiState extends State<RegisterTeknisi> {
   double? _currentLng;
   final Geocoding _geocoding = Geocoding();
 
-  // State untuk bidang keahlian
-  Set<String> _selectedSkills = {'Kelistrikan'};
+  // Keahlian berasal dari endpoint categories FastAPI.
+  final List<Map<String, dynamic>> _skillCategories = [];
+  final Set<String> _selectedSkills = {};
+  final Map<String, IconData> _skillIcons = {};
+  final Map<String, Color> _skillColors = {};
+  bool _isLoadingCategories = true;
+  String? _categoriesError;
   bool _agreedToTerms = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSkillCategories();
+  }
+
+  Future<void> _loadSkillCategories() async {
+    try {
+      final categories = await AuthService.getCategories();
+      if (!mounted) return;
+      setState(() {
+        _skillCategories
+          ..clear()
+          ..addAll(categories);
+        _skillIcons.clear();
+        _skillColors.clear();
+        for (final category in categories) {
+          final code = '${category['code']}';
+          _skillIcons[code] = _skillIcon('${category['icon'] ?? ''}', code);
+          _skillColors[code] = _colorFromHex(category['color'] as String?);
+        }
+        _isLoadingCategories = false;
+        _categoriesError = null;
+        if (_selectedSkills.isEmpty && categories.isNotEmpty) {
+          _selectedSkills.add('${categories.first['code']}');
+        }
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingCategories = false;
+        _categoriesError = error.toString().replaceFirst('Exception: ', '');
+      });
+    }
+  }
+
   bool _agreedToTerms2 = false;
 
   Future<void> _getLocationAndFillFields() async {
@@ -181,15 +228,19 @@ class _RegisterTeknisiState extends State<RegisterTeknisi> {
     super.dispose();
   }
 
-  Widget _buildSkillCard(String skillName, IconData icon) {
-    bool isSelected = _selectedSkills.contains(skillName);
+  Widget _buildSkillCard(Map<String, dynamic> category) {
+    final code = '${category['code']}';
+    final skillName = '${category['skill_label']}';
+    final icon = _skillIcons[code] ?? Icons.handyman_rounded;
+    final color = _skillColors[code] ?? const Color(0xfff6f2ff);
+    final isSelected = _selectedSkills.contains(code);
     return GestureDetector(
       onTap: () {
         setState(() {
           if (isSelected) {
-            _selectedSkills.remove(skillName);
+            _selectedSkills.remove(code);
           } else {
-            _selectedSkills.add(skillName);
+            _selectedSkills.add(code);
           }
         });
       },
@@ -199,7 +250,9 @@ class _RegisterTeknisiState extends State<RegisterTeknisi> {
           margin: EdgeInsets.fromLTRB(0, 10, 0, 0),
           padding: EdgeInsets.all(10),
           decoration: BoxDecoration(
-            color: isSelected ? Color(0xff006344) : Color(0xfff6f2ff),
+            color: isSelected
+                ? const Color(0xff006344)
+                : color.withValues(alpha: 0.16),
             shape: BoxShape.rectangle,
             borderRadius: BorderRadius.circular(10.0),
           ),
@@ -234,6 +287,26 @@ class _RegisterTeknisiState extends State<RegisterTeknisi> {
         ),
       ),
     );
+  }
+
+  Color _colorFromHex(String? value) {
+    if (value == null || !value.startsWith('#')) {
+      return const Color(0xfff6f2ff);
+    }
+    final hex = value.substring(1);
+    final parsed = int.tryParse(hex, radix: 16);
+    if (parsed == null) return const Color(0xfff6f2ff);
+    return Color(hex.length == 6 ? 0xff000000 | parsed : parsed);
+  }
+
+  IconData _skillIcon(String iconValue, String code) {
+    final lower = '$iconValue $code'.toLowerCase();
+    if (lower.contains('electrical')) return Icons.electric_bolt_rounded;
+    if (lower.contains('plumbing')) return Icons.water_drop_rounded;
+    if (lower.contains('vehicle')) return Icons.two_wheeler_rounded;
+    if (lower.contains('moving')) return Icons.local_shipping_rounded;
+    if (lower.contains('tech')) return Icons.devices_rounded;
+    return Icons.handyman_rounded;
   }
 
   @override
@@ -1251,12 +1324,23 @@ class _RegisterTeknisiState extends State<RegisterTeknisi> {
                         ),
                       ),
                     ),
-                    _buildSkillCard('Kelistrikan', Icons.electric_bolt_rounded),
-                    _buildSkillCard('Air', Icons.water_drop),
-                    _buildSkillCard('Kendaraan', Icons.two_wheeler),
-                    _buildSkillCard('Elektronik', Icons.devices),
-                    _buildSkillCard('Angkut Barang', Icons.local_shipping),
-                    _buildSkillCard('Lainnya', Icons.grid_view_rounded),
+                    if (_isLoadingCategories)
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 12),
+                        child: CircularProgressIndicator(),
+                      )
+                    else if (_categoriesError != null)
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: _loadSkillCategories,
+                          child: Text(
+                            'Gagal memuat kategori. Coba lagi: $_categoriesError',
+                          ),
+                        ),
+                      )
+                    else
+                      ..._skillCategories.map(_buildSkillCard),
                   ],
                 ),
               ),

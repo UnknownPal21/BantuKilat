@@ -1,4 +1,5 @@
 import 'package:bantukilat/page/loginpage.dart';
+import 'package:bantukilat/page/splash_screen.dart';
 import 'package:bantukilat/page/teknisi/HomePageTeknisi.dart';
 import 'package:bantukilat/page/user/HomePageUser.dart';
 import 'package:bantukilat/services/auth_service.dart';
@@ -14,6 +15,7 @@ class MainApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
+      debugShowCheckedModeBanner: false,
       home: FutureBuilder<Map<String, dynamic>?>(
         future: AuthService.validateSession(),
         builder: (context, snapshot) {
@@ -23,12 +25,15 @@ class MainApp extends StatelessWidget {
             );
           }
           final user = snapshot.data;
-          if (user == null) return const LoginPage();
-          return (user['role'] as String).toUpperCase() == 'TECHNICIAN'
-              ? const HomePageTeknisi()
-              : const HomePageUser();
+          final Widget nextScreen = user == null
+              ? const LoginPage()
+              : ((user['role'] as String).toUpperCase() == 'TECHNICIAN'
+                  ? const HomePageTeknisi()
+                  : const HomePageUser());
+          return SplashScreen(nextScreen: nextScreen);
         },
       ),
     );
   }
 }
+
