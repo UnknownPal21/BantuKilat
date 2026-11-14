@@ -13,6 +13,8 @@ dependencies:
   geocoding: ^5.0.1
   geolocator: ^14.1.2
   http: ^1.1.0
+  flutter_secure_storage: 11.2.0
+  flutter_image_compress: ^2.4.0
   image_picker: ^1.2.4
 
 dev_dependencies:

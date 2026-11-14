@@ -5,8 +5,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'package:bantukilat/services/auth_service.dart';
 
 class DetailTawaran extends StatefulWidget {
+  final String? offerId;
+  final String? bidId;
   final String title;
   final String customerName;
   final String customerAvatar;
@@ -18,6 +21,8 @@ class DetailTawaran extends StatefulWidget {
 
   const DetailTawaran({
     super.key,
+    this.offerId,
+    this.bidId,
     required this.title,
     required this.previewImage,
     required this.description,
@@ -46,10 +51,68 @@ class _DetailTawaranState extends State<DetailTawaran> {
     112.7521,
   ); // Default fallback (Surabaya)
   bool _isSearchingLocation = true;
+  String? _accessToken;
+  bool _isTechnician = false;
+  bool _isSendingBid = false;
+  bool _isAcceptingBid = false;
+
+  Future<void> _acceptSelectedBid() async {
+    if (widget.bidId == null || _isAcceptingBid) return;
+    setState(() => _isAcceptingBid = true);
+    try {
+      await AuthService.acceptBid(widget.bidId!);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Tawaran teknisi berhasil diterima.')),
+      );
+      Navigator.pop(context, true);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isAcceptingBid = false);
+    }
+  }
+
+  Future<void> _sendBid(int amount) async {
+    if (!_isTechnician || widget.offerId == null || _isSendingBid) return;
+    setState(() => _isSendingBid = true);
+    try {
+      await AuthService.placeBid(offerId: widget.offerId!, amount: amount);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Tawaran ${_formatRupiah(amount)} berhasil dikirim.'),
+        ),
+      );
+      Navigator.pop(context, true);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSendingBid = false);
+    }
+  }
 
   @override
   void initState() {
     super.initState();
+    AuthService.getToken().then((token) {
+      if (mounted) setState(() => _accessToken = token);
+    });
+    AuthService.getCurrentUser().then((user) {
+      if (mounted) {
+        setState(() => _isTechnician = user?['role'] == 'TECHNICIAN');
+      }
+    });
     _geocodeAddressFromText();
   }
 
@@ -362,9 +425,27 @@ class _DetailTawaranState extends State<DetailTawaran> {
     double? width,
     BoxFit fit = BoxFit.cover,
   }) {
+    if (path.startsWith('data:image/')) {
+      try {
+        final commaIndex = path.indexOf(',');
+        final bytes = base64Decode(path.substring(commaIndex + 1));
+        return Image.memory(
+          bytes,
+          height: height,
+          width: width,
+          fit: fit,
+          errorBuilder: (_, __, ___) => _imageErrorFallback(height, width),
+        );
+      } catch (_) {
+        return _imageErrorFallback(height, width);
+      }
+    }
     if (path.startsWith('http://') || path.startsWith('https://')) {
       return Image.network(
         path,
+        headers: {
+          if (_accessToken != null) 'Authorization': 'Bearer $_accessToken',
+        },
         height: height,
         width: width,
         fit: fit,
@@ -957,202 +1038,198 @@ class _DetailTawaranState extends State<DetailTawaran> {
                                   ],
                                 ),
                               ),
-                              const SizedBox(height: 20),
-                              // Section Nego Harga
-                              Container(
-                                width: MediaQuery.of(context).size.width,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 14,
-                                  horizontal: 12,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xffeaedff),
-                                  borderRadius: BorderRadius.circular(14.0),
-                                ),
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const Center(
-                                      child: Text(
-                                        "Nego Harga",
-                                        style: TextStyle(
-                                          fontWeight: FontWeight.w700,
-                                          fontSize: 14,
-                                          color: Color(0xff000000),
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 10),
-                                    Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        const Text(
-                                          "Pilih Nominal Kenaikan",
+                              if (_isTechnician &&
+                                  widget.bidId == null &&
+                                  widget.offerId != null) ...[
+                                const SizedBox(height: 20),
+                                // Section Nego Harga
+                                Container(
+                                  width: MediaQuery.of(context).size.width,
+                                  padding: const EdgeInsets.symmetric(
+                                    vertical: 14,
+                                    horizontal: 12,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xffeaedff),
+                                    borderRadius: BorderRadius.circular(14.0),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      const Center(
+                                        child: Text(
+                                          "Nego Harga",
                                           style: TextStyle(
                                             fontWeight: FontWeight.w700,
-                                            fontSize: 11,
-                                            color: Color(0xff404e46),
+                                            fontSize: 14,
+                                            color: Color(0xff000000),
                                           ),
                                         ),
-                                        if (hasNegoSelected)
-                                          GestureDetector(
-                                            onTap: () {
-                                              setState(() {
-                                                _selectedNegoIndex = null;
-                                              });
-                                            },
-                                            child: const Text(
-                                              "Reset Nego",
-                                              style: TextStyle(
-                                                fontSize: 11,
-                                                fontWeight: FontWeight.w600,
-                                                color: Colors.redAccent,
-                                              ),
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        mainAxisAlignment:
+                                            MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          const Text(
+                                            "Pilih Nominal Kenaikan",
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 11,
+                                              color: Color(0xff404e46),
                                             ),
                                           ),
-                                      ],
-                                    ),
-                                    const SizedBox(height: 10),
-                                    SingleChildScrollView(
-                                      scrollDirection: Axis.horizontal,
-                                      child: Row(
-                                        children: [
-                                          // 3 Tombol Preset (+5.000, +15.000, +30.000)
-                                          ...List.generate(
-                                            _presetIncrements.length,
-                                            (index) {
-                                              final int inc =
-                                                  _presetIncrements[index];
-                                              final int total =
-                                                  widget.initialWage + inc;
-                                              final bool isSelected =
-                                                  _selectedNegoIndex == index;
+                                          if (hasNegoSelected)
+                                            GestureDetector(
+                                              onTap: () {
+                                                setState(() {
+                                                  _selectedNegoIndex = null;
+                                                });
+                                              },
+                                              child: const Text(
+                                                "Reset Nego",
+                                                style: TextStyle(
+                                                  fontSize: 11,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: Colors.redAccent,
+                                                ),
+                                              ),
+                                            ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                      SingleChildScrollView(
+                                        scrollDirection: Axis.horizontal,
+                                        child: Row(
+                                          children: [
+                                            // 3 Tombol Preset (+5.000, +15.000, +30.000)
+                                            ...List.generate(
+                                              _presetIncrements.length,
+                                              (index) {
+                                                final int inc =
+                                                    _presetIncrements[index];
+                                                final int total =
+                                                    widget.initialWage + inc;
+                                                final bool isSelected =
+                                                    _selectedNegoIndex == index;
 
-                                              return GestureDetector(
-                                                onTap: () {
-                                                  setState(() {
-                                                    // Jika diklik ulang tombol yang sama, batalkan pilihan
-                                                    if (_selectedNegoIndex ==
-                                                        index) {
-                                                      _selectedNegoIndex = null;
-                                                    } else {
-                                                      _selectedNegoIndex =
-                                                          index;
-                                                    }
-                                                  });
-                                                },
-                                                child: AnimatedContainer(
-                                                  duration: const Duration(
-                                                    milliseconds: 180,
-                                                  ),
-                                                  margin: const EdgeInsets.only(
-                                                    right: 10,
-                                                  ),
-                                                  width: 105,
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        vertical: 8,
-                                                        horizontal: 6,
-                                                      ),
-                                                  decoration: BoxDecoration(
-                                                    color: isSelected
-                                                        ? const Color(
-                                                            0xff006a49,
-                                                          )
-                                                        : Colors.white,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                          15.0,
+                                                return GestureDetector(
+                                                  onTap: () {
+                                                    setState(() {
+                                                      // Jika diklik ulang tombol yang sama, batalkan pilihan
+                                                      if (_selectedNegoIndex ==
+                                                          index) {
+                                                        _selectedNegoIndex =
+                                                            null;
+                                                      } else {
+                                                        _selectedNegoIndex =
+                                                            index;
+                                                      }
+                                                    });
+                                                  },
+                                                  child: AnimatedContainer(
+                                                    duration: const Duration(
+                                                      milliseconds: 180,
+                                                    ),
+                                                    margin:
+                                                        const EdgeInsets.only(
+                                                          right: 10,
                                                         ),
-                                                    border: Border.all(
+                                                    width: 105,
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          vertical: 8,
+                                                          horizontal: 6,
+                                                        ),
+                                                    decoration: BoxDecoration(
                                                       color: isSelected
                                                           ? const Color(
                                                               0xff006a49,
                                                             )
-                                                          : Colors.transparent,
+                                                          : Colors.white,
+                                                      borderRadius:
+                                                          BorderRadius.circular(
+                                                            15.0,
+                                                          ),
+                                                      border: Border.all(
+                                                        color: isSelected
+                                                            ? const Color(
+                                                                0xff006a49,
+                                                              )
+                                                            : Colors
+                                                                  .transparent,
+                                                      ),
+                                                    ),
+                                                    child: Column(
+                                                      children: [
+                                                        Text(
+                                                          "+ ${_formatRupiah(inc)}",
+                                                          style: TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                            fontSize: 10,
+                                                            color: isSelected
+                                                                ? Colors.white
+                                                                : const Color(
+                                                                    0xff717e76,
+                                                                  ),
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 3,
+                                                        ),
+                                                        Text(
+                                                          _formatRupiah(total),
+                                                          style: TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.w700,
+                                                            fontSize: 13,
+                                                            color: isSelected
+                                                                ? Colors.white
+                                                                : const Color(
+                                                                    0xff000000,
+                                                                  ),
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
                                                   ),
-                                                  child: Column(
-                                                    children: [
-                                                      Text(
-                                                        "+ ${_formatRupiah(inc)}",
-                                                        style: TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                          fontSize: 10,
-                                                          color: isSelected
-                                                              ? Colors.white
-                                                              : const Color(
-                                                                  0xff717e76,
-                                                                ),
-                                                        ),
-                                                      ),
-                                                      const SizedBox(height: 3),
-                                                      Text(
-                                                        _formatRupiah(total),
-                                                        style: TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.w700,
-                                                          fontSize: 13,
-                                                          color: isSelected
-                                                              ? Colors.white
-                                                              : const Color(
-                                                                  0xff000000,
-                                                                ),
-                                                        ),
-                                                      ),
-                                                    ],
-                                                  ),
+                                                );
+                                              },
+                                            ),
+                                            // Tombol ke-4: Custom Nego dengan Ikon Pensil
+                                            GestureDetector(
+                                              onTap: _showCustomPriceModal,
+                                              child: AnimatedContainer(
+                                                duration: const Duration(
+                                                  milliseconds: 180,
                                                 ),
-                                              );
-                                            },
-                                          ),
-                                          // Tombol ke-4: Custom Nego dengan Ikon Pensil
-                                          GestureDetector(
-                                            onTap: _showCustomPriceModal,
-                                            child: AnimatedContainer(
-                                              duration: const Duration(
-                                                milliseconds: 180,
-                                              ),
-                                              width: 105,
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    vertical: 8,
-                                                    horizontal: 6,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: _selectedNegoIndex == 3
-                                                    ? const Color(0xff006a49)
-                                                    : Colors.white,
-                                                borderRadius:
-                                                    BorderRadius.circular(15.0),
-                                              ),
-                                              child: Column(
-                                                children: [
-                                                  Row(
-                                                    mainAxisAlignment:
-                                                        MainAxisAlignment
-                                                            .center,
-                                                    children: [
-                                                      Icon(
-                                                        Icons.edit,
-                                                        size: 12,
-                                                        color:
-                                                            _selectedNegoIndex ==
-                                                                3
-                                                            ? Colors.white
-                                                            : const Color(
-                                                                0xff717e76,
-                                                              ),
+                                                width: 105,
+                                                padding:
+                                                    const EdgeInsets.symmetric(
+                                                      vertical: 8,
+                                                      horizontal: 6,
+                                                    ),
+                                                decoration: BoxDecoration(
+                                                  color: _selectedNegoIndex == 3
+                                                      ? const Color(0xff006a49)
+                                                      : Colors.white,
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                        15.0,
                                                       ),
-                                                      const SizedBox(width: 4),
-                                                      Text(
-                                                        "Custom",
-                                                        style: TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.w600,
-                                                          fontSize: 10,
+                                                ),
+                                                child: Column(
+                                                  children: [
+                                                    Row(
+                                                      mainAxisAlignment:
+                                                          MainAxisAlignment
+                                                              .center,
+                                                      children: [
+                                                        Icon(
+                                                          Icons.edit,
+                                                          size: 12,
                                                           color:
                                                               _selectedNegoIndex ==
                                                                   3
@@ -1161,183 +1238,225 @@ class _DetailTawaranState extends State<DetailTawaran> {
                                                                   0xff717e76,
                                                                 ),
                                                         ),
-                                                      ),
-                                                    ],
-                                                  ),
-                                                  const SizedBox(height: 3),
-                                                  Text(
-                                                    _selectedNegoIndex == 3 &&
-                                                            _customNegotiatedTotal !=
-                                                                null
-                                                        ? _formatRupiah(
-                                                            _customNegotiatedTotal!,
-                                                          )
-                                                        : "Atur Harga",
-                                                    style: TextStyle(
-                                                      fontWeight:
-                                                          FontWeight.w700,
-                                                      fontSize: 13,
-                                                      color:
-                                                          _selectedNegoIndex ==
-                                                              3
-                                                          ? Colors.white
-                                                          : const Color(
-                                                              0xff000000,
-                                                            ),
+                                                        const SizedBox(
+                                                          width: 4,
+                                                        ),
+                                                        Text(
+                                                          "Custom",
+                                                          style: TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.w600,
+                                                            fontSize: 10,
+                                                            color:
+                                                                _selectedNegoIndex ==
+                                                                    3
+                                                                ? Colors.white
+                                                                : const Color(
+                                                                    0xff717e76,
+                                                                  ),
+                                                          ),
+                                                        ),
+                                                      ],
                                                     ),
-                                                  ),
-                                                ],
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                    const SizedBox(height: 16),
-                                    // Baris Tombol Terima & Kirim Tawaran
-                                    Row(
-                                      children: [
-                                        // Tombol Terima (Selalu tampil dengan harga awal/default)
-                                        Expanded(
-                                          child: InkWell(
-                                            borderRadius: BorderRadius.circular(
-                                              15,
-                                            ),
-                                            onTap: () {
-                                              ScaffoldMessenger.of(
-                                                context,
-                                              ).showSnackBar(
-                                                SnackBar(
-                                                  content: Text(
-                                                    "Order diterima dengan upah awal ${_formatRupiah(widget.initialWage)}",
-                                                  ),
-                                                  backgroundColor: const Color(
-                                                    0xff006a49,
-                                                  ),
-                                                ),
-                                              );
-                                              // TODO: Panggil endpoint FastAPI untuk Accept Order
-                                            },
-                                            child: Card(
-                                              margin: const EdgeInsets.all(4),
-                                              color: Colors.white,
-                                              elevation: 1,
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(15.0),
-                                              ),
-                                              child: Padding(
-                                                padding:
-                                                    const EdgeInsets.symmetric(
-                                                      vertical: 10,
-                                                    ),
-                                                child: Column(
-                                                  children: [
-                                                    const Text(
-                                                      "Terima",
+                                                    const SizedBox(height: 3),
+                                                    Text(
+                                                      _selectedNegoIndex == 3 &&
+                                                              _customNegotiatedTotal !=
+                                                                  null
+                                                          ? _formatRupiah(
+                                                              _customNegotiatedTotal!,
+                                                            )
+                                                          : "Atur Harga",
                                                       style: TextStyle(
                                                         fontWeight:
                                                             FontWeight.w700,
-                                                        fontSize: 11,
-                                                        color: Color(
-                                                          0xff3f4c44,
-                                                        ),
-                                                      ),
-                                                    ),
-                                                    const SizedBox(height: 2),
-                                                    Text(
-                                                      _formatRupiah(
-                                                        widget.initialWage,
-                                                      ),
-                                                      style: const TextStyle(
-                                                        fontWeight:
-                                                            FontWeight.w700,
-                                                        fontSize: 14,
-                                                        color: Color(
-                                                          0xff006243,
-                                                        ),
+                                                        fontSize: 13,
+                                                        color:
+                                                            _selectedNegoIndex ==
+                                                                3
+                                                            ? Colors.white
+                                                            : const Color(
+                                                                0xff000000,
+                                                              ),
                                                       ),
                                                     ),
                                                   ],
                                                 ),
                                               ),
                                             ),
-                                          ),
+                                          ],
                                         ),
-                                        // Tombol Kirim Tawaran (Hanya muncul jika ada opsi nego yang dipilih)
-                                        if (hasNegoSelected) ...[
-                                          const SizedBox(width: 8),
-                                          Expanded(
-                                            child: InkWell(
-                                              borderRadius:
-                                                  BorderRadius.circular(15),
-                                              onTap: () {
-                                                final int finalNego =
-                                                    _activeNegotiatedPrice!;
-                                                ScaffoldMessenger.of(
-                                                  context,
-                                                ).showSnackBar(
-                                                  SnackBar(
-                                                    content: Text(
-                                                      "Tawaran nego ${_formatRupiah(finalNego)} berhasil dikirim!",
-                                                    ),
-                                                    backgroundColor:
-                                                        const Color(0xff006a49),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      // Baris Tombol Terima & Kirim Tawaran
+                                      Row(
+                                        children: [
+                                          if (widget.bidId == null &&
+                                              widget.offerId != null)
+                                            Expanded(
+                                              child: InkWell(
+                                                borderRadius:
+                                                    BorderRadius.circular(15),
+                                                onTap: _isSendingBid
+                                                    ? null
+                                                    : () => _sendBid(
+                                                        widget.initialWage,
+                                                      ),
+                                                child: Card(
+                                                  margin: const EdgeInsets.all(
+                                                    4,
                                                   ),
-                                                );
-                                                // TODO: Panggil endpoint FastAPI untuk Kirim Tawaran Nego (finalNego)
-                                              },
-                                              child: Card(
-                                                margin: const EdgeInsets.all(4),
-                                                color: const Color(0xff006a49),
-                                                elevation: 1,
-                                                shape: RoundedRectangleBorder(
-                                                  borderRadius:
-                                                      BorderRadius.circular(
-                                                        15.0,
-                                                      ),
-                                                ),
-                                                child: Padding(
-                                                  padding:
-                                                      const EdgeInsets.symmetric(
-                                                        vertical: 10,
-                                                      ),
-                                                  child: Column(
-                                                    children: [
-                                                      const Text(
-                                                        "Kirim Tawaran",
-                                                        style: TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.w700,
-                                                          fontSize: 11,
-                                                          color: Colors.white,
+                                                  color: Colors.white,
+                                                  elevation: 1,
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          15.0,
                                                         ),
-                                                      ),
-                                                      const SizedBox(height: 2),
-                                                      Text(
-                                                        _formatRupiah(
-                                                          _activeNegotiatedPrice!,
+                                                  ),
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          vertical: 10,
                                                         ),
-                                                        style: const TextStyle(
-                                                          fontWeight:
-                                                              FontWeight.w700,
-                                                          fontSize: 14,
-                                                          color: Colors.white,
+                                                    child: Column(
+                                                      children: [
+                                                        const Text(
+                                                          "Terima",
+                                                          style: TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.w700,
+                                                            fontSize: 11,
+                                                            color: Color(
+                                                              0xff3f4c44,
+                                                            ),
+                                                          ),
                                                         ),
-                                                      ),
-                                                    ],
+                                                        const SizedBox(
+                                                          height: 2,
+                                                        ),
+                                                        Text(
+                                                          _formatRupiah(
+                                                            widget.initialWage,
+                                                          ),
+                                                          style:
+                                                              const TextStyle(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w700,
+                                                                fontSize: 14,
+                                                                color: Color(
+                                                                  0xff006243,
+                                                                ),
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
                                                   ),
                                                 ),
                                               ),
                                             ),
-                                          ),
+                                          // Tombol Kirim Tawaran (Hanya muncul jika ada opsi nego yang dipilih)
+                                          if (hasNegoSelected) ...[
+                                            const SizedBox(width: 8),
+                                            Expanded(
+                                              child: InkWell(
+                                                borderRadius:
+                                                    BorderRadius.circular(15),
+                                                onTap: _isSendingBid
+                                                    ? null
+                                                    : () => _sendBid(
+                                                        _activeNegotiatedPrice!,
+                                                      ),
+                                                child: Card(
+                                                  margin: const EdgeInsets.all(
+                                                    4,
+                                                  ),
+                                                  color: const Color(
+                                                    0xff006a49,
+                                                  ),
+                                                  elevation: 1,
+                                                  shape: RoundedRectangleBorder(
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                          15.0,
+                                                        ),
+                                                  ),
+                                                  child: Padding(
+                                                    padding:
+                                                        const EdgeInsets.symmetric(
+                                                          vertical: 10,
+                                                        ),
+                                                    child: Column(
+                                                      children: [
+                                                        const Text(
+                                                          "Kirim Tawaran",
+                                                          style: TextStyle(
+                                                            fontWeight:
+                                                                FontWeight.w700,
+                                                            fontSize: 11,
+                                                            color: Colors.white,
+                                                          ),
+                                                        ),
+                                                        const SizedBox(
+                                                          height: 2,
+                                                        ),
+                                                        Text(
+                                                          _formatRupiah(
+                                                            _activeNegotiatedPrice!,
+                                                          ),
+                                                          style:
+                                                              const TextStyle(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w700,
+                                                                fontSize: 14,
+                                                                color: Colors
+                                                                    .white,
+                                                              ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
                                         ],
-                                      ],
-                                    ),
-                                  ],
+                                      ),
+                                    ],
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 40),
+                                if (widget.bidId != null && _isTechnician) ...[
+                                  const SizedBox(height: 12),
+                                  SizedBox(
+                                    width: double.infinity,
+                                    child: ElevatedButton(
+                                      onPressed: _isAcceptingBid
+                                          ? null
+                                          : _acceptSelectedBid,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(
+                                          0xff006a49,
+                                        ),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            12,
+                                          ),
+                                        ),
+                                      ),
+                                      child: _isAcceptingBid
+                                          ? const CircularProgressIndicator(
+                                              color: Colors.white,
+                                            )
+                                          : const Text(
+                                              'Terima Tawaran Teknisi',
+                                            ),
+                                    ),
+                                  ),
+                                ],
+                                const SizedBox(height: 40),
+                              ],
                             ],
                           ),
                         ),

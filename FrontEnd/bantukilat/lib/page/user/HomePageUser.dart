@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:bantukilat/page/user/ListMyTawaran.dart';
 import 'package:bantukilat/page/user/TawaranSaya.dart';
+import 'package:bantukilat/page/loginpage.dart';
+import 'package:bantukilat/services/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
@@ -25,11 +27,28 @@ class _HomePageUserState extends State<HomePageUser> {
     112.7521,
   ); // Default awal sebelum GPS mengunci
   bool _isLoadingLocation = true;
+  Map<String, dynamic>? _userProfile;
+
+  Future<void> _loadProfile() async {
+    final profile = await AuthService.getCurrentUser();
+    if (mounted) setState(() => _userProfile = profile);
+  }
+
+  Future<void> _logout() async {
+    await AuthService.logout();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (_) => false,
+    );
+  }
 
   @override
   void initState() {
     super.initState();
     _initLocationTracking();
+    _loadProfile();
   }
 
   @override
@@ -131,13 +150,13 @@ class _HomePageUserState extends State<HomePageUser> {
                   },
                 ),
               ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(0, 5, 0, 15),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(0, 5, 0, 15),
                 child: Text(
-                  "User",
+                  _userProfile?['name'] as String? ?? 'User',
                   textAlign: TextAlign.start,
-                  overflow: TextOverflow.clip,
-                  style: TextStyle(
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
                     fontWeight: FontWeight.w500,
                     fontStyle: FontStyle.normal,
                     fontSize: 18,
@@ -347,33 +366,19 @@ class _HomePageUserState extends State<HomePageUser> {
                 ),
               ),
               InkWell(
-                onTap: () {
-                  Navigator.pop(context);
-                },
+                onTap: _logout,
                 child: Container(
-                  margin: const EdgeInsets.symmetric(
-                    vertical: 15,
-                    horizontal: 0,
-                  ),
+                  margin: const EdgeInsets.symmetric(vertical: 15),
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   width: MediaQuery.of(context).size.width,
-                  decoration: const BoxDecoration(
-                    color: Color(0x00000000),
-                    shape: BoxShape.rectangle,
-                    borderRadius: BorderRadius.zero,
-                  ),
+                  decoration: const BoxDecoration(color: Color(0x00000000)),
                   child: const Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    crossAxisAlignment: CrossAxisAlignment.center,
-                    mainAxisSize: MainAxisSize.max,
                     children: [
                       Text(
-                        "Tentang Aplikasi",
-                        textAlign: TextAlign.start,
-                        overflow: TextOverflow.clip,
+                        "Log Out",
                         style: TextStyle(
                           fontWeight: FontWeight.w400,
-                          fontStyle: FontStyle.normal,
                           fontSize: 16,
                           color: Color(0xffffffff),
                         ),
@@ -771,8 +776,15 @@ class KategoriLayananCard extends StatelessWidget {
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (context) => TawaranSaya()),
-        );
+          MaterialPageRoute(builder: (context) => const TawaranSaya()),
+        ).then((created) {
+          if (created == true) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => ListMyTawaran()),
+            );
+          }
+        });
       },
       child: Card(
         margin: const EdgeInsets.all(4),

@@ -3,6 +3,7 @@ import 'package:bantukilat/page/teknisi/RegisterTeknisi.dart';
 import 'package:bantukilat/page/forgotpassword.dart';
 import 'package:bantukilat/page/registerpage.dart';
 import 'package:bantukilat/page/user/HomePageUser.dart';
+import 'package:bantukilat/services/auth_service.dart';
 import 'package:flutter/material.dart';
 
 class LoginPage extends StatefulWidget {
@@ -20,6 +21,36 @@ class _LoginPageState extends State<LoginPage> {
 
   bool _isObscure = true;
   bool _rememberMe = false;
+  bool _isLoading = false;
+
+  Future<void> _login() async {
+    if (_isLoading) return;
+    setState(() => _isLoading = true);
+    try {
+      final result = await AuthService.login(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
+      if (!mounted) return;
+      final user = Map<String, dynamic>.from(result['user'] as Map);
+      final role = AuthNavigation.homeRouteForRole(user['role'] as String);
+      final page = role == 'user'
+          ? const HomePageUser()
+          : const HomePageTeknisi();
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => page),
+        (_) => false,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(error.toString().replaceFirst('Exception: ', ''))),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -317,27 +348,7 @@ class _LoginPageState extends State<LoginPage> {
                           Padding(
                             padding: const EdgeInsets.fromLTRB(0, 10, 0, 15),
                             child: MaterialButton(
-                              onPressed: () {
-                                if (_emailController.text == "user") {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const HomePageUser(),
-                                    ),
-                                  );
-                                  return;
-                                }
-                                if (_emailController.text == "teknisi") {
-                                  Navigator.push(
-                                    context,
-                                    MaterialPageRoute(
-                                      builder: (context) =>
-                                          const HomePageTeknisi(),
-                                    ),
-                                  );
-                                }
-                              },
+                              onPressed: _isLoading ? null : _login,
                               color: const Color(0xff006747),
                               elevation: 0,
                               shape: RoundedRectangleBorder(
@@ -347,14 +358,23 @@ class _LoginPageState extends State<LoginPage> {
                               textColor: const Color(0xffffffff),
                               height: 50,
                               minWidth: MediaQuery.of(context).size.width,
-                              child: const Text(
-                                "Masuk",
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                  fontStyle: FontStyle.normal,
-                                ),
-                              ),
+                              child: _isLoading
+                                  ? const SizedBox(
+                                      height: 20,
+                                      width: 20,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Text(
+                                      "Masuk",
+                                      style: TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w600,
+                                        fontStyle: FontStyle.normal,
+                                      ),
+                                    ),
                             ),
                           ),
                           Row(

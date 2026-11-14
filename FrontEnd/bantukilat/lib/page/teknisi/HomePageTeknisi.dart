@@ -7,6 +7,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
+import 'package:bantukilat/services/auth_service.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:bantukilat/page/loginpage.dart';
 
 class HomePageTeknisi extends StatefulWidget {
   const HomePageTeknisi({super.key});
@@ -37,52 +40,150 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
   ];
 
   // 3. Data Dummy Tawaran Sekitar (Dinamis, bisa ditolak/dihapus, tampil maks 3)
-  final List<Map<String, dynamic>> _daftarTawaranSekitar = [
-    {
-      "id": 1,
-      "namaUser": "User 123",
-      "jarak": "320 Meter",
-      "tipeKerusakan": "Kelistrikan",
-      "warnaContainerTipe": const Color(0xffffddb8),
-      "warnaTextTipe": const Color(0xff2c1800),
-      "judulKerusakan": "Stopkontak bau gosong",
-      "deskripsiKerusakan": "Perlu dicek sekring utama, kabel jalur ruang tamu bau menyengat dan sempat keluar percikan api.",
-      "alamat": "Jl. Kalijudan Barat III No. 12, Surabaya",
-      "upah": "Rp 35.000",
-      "upahInt": 35000,
-    },
-    {
-      "id": 2,
-      "namaUser": "Pak Budi",
-      "jarak": "450 Meter",
-      "tipeKerusakan": "Saluran Air",
-      "warnaContainerTipe": const Color(0xffd0e8ff),
-      "warnaTextTipe": const Color(0xff003366),
-      "judulKerusakan": "Wastafel Dapur Mampet",
-      "deskripsiKerusakan": "Air pembuangan cucian piring tidak mau turun sama sekali sejak tadi pagi.",
-      "alamat": "Jl. Mulyorejo Tengah No. 45, Surabaya",
-      "upah": "Rp 40.000",
-      "upahInt": 40000,
-    },
-    {
-      "id": 3,
-      "namaUser": "Bu Yan",
-      "jarak": "500 Meter",
-      "tipeKerusakan": "Lainnya",
-      "warnaContainerTipe": const Color(0xffe2d4ff),
-      "warnaTextTipe": const Color(0xff3a0066),
-      "judulKerusakan": "Engsel Pintu Pagar Lepas",
-      "deskripsiKerusakan": "Las engsel bawah pagar besi patah, pintu pagar miring tidak bisa ditutup.",
-      "alamat": "Jl. Pacar Kembang II No. 8, Surabaya",
-      "upah": "Rp 50.000",
-      "upahInt": 50000,
-    },
-  ];
+  final List<Map<String, dynamic>> _daftarTawaranSekitar = [];
+  Map<String, dynamic>? _technicianProfile;
+  double? _technicianLat;
+  double? _technicianLng;
+  bool _isLoadingNearby = true;
+  String? _nearbyError;
+
+  Future<void> _loadTechnicianData() async {
+    final profile = await AuthService.getCurrentUser();
+    if (mounted) setState(() => _technicianProfile = profile);
+    await _loadNearbyOffers();
+  }
+
+  Future<void> _loadNearbyOffers() async {
+    if (!mounted) return;
+    setState(() {
+      _isLoadingNearby = true;
+      _nearbyError = null;
+    });
+    try {
+      double lat = _technicianLat ?? -7.2575;
+      double lng = _technicianLng ?? 112.7521;
+      try {
+        final position = await Geolocator.getCurrentPosition();
+        lat = position.latitude;
+        lng = position.longitude;
+        _technicianLat = lat;
+        _technicianLng = lng;
+      } catch (_) {}
+      final offers = await AuthService.getNearbyOffers(
+        latitude: lat,
+        longitude: lng,
+        limit: 20,
+      );
+      final items = offers.map(_offerToHomeCard).toList();
+      if (!mounted) return;
+      setState(() {
+        _daftarTawaranSekitar
+          ..clear()
+          ..addAll(items);
+        _isLoadingNearby = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _nearbyError = error.toString().replaceFirst('Exception: ', '');
+        _isLoadingNearby = false;
+      });
+    }
+  }
+
+  Map<String, dynamic> _offerToHomeCard(Map<String, dynamic> offer) {
+    final category = Map<String, dynamic>.from(
+      (offer['category_snapshot'] as Map?) ?? const {},
+    );
+    final categoryName = '${category['label'] ?? 'Layanan'}';
+    final palette = _categoryPalette(categoryName);
+    final requester = Map<String, dynamic>.from(
+      (offer['requester_snapshot'] as Map?) ?? const {},
+    );
+    final budget = offer['agreed_price'] ?? offer['initial_budget'] ?? 0;
+    final distance = offer['distance_m'];
+    return {
+      'id': '${offer['_id']}',
+      'offer': offer,
+      'namaUser': '${requester['name'] ?? 'Pengguna'}',
+      'jarak': distance is num
+          ? (distance >= 1000
+                ? '${(distance / 1000).toStringAsFixed(1)} KM'
+                : '${distance.round()} Meter')
+          : '',
+      'tipeKerusakan': categoryName,
+      'warnaContainerTipe': palette.$1,
+      'warnaTextTipe': palette.$2,
+      'judulKerusakan': '${offer['title'] ?? ''}',
+      'deskripsiKerusakan': '${offer['description'] ?? ''}',
+      'alamat': '${offer['address_text'] ?? ''}',
+      'upahInt': budget is num ? budget.toInt() : int.tryParse('$budget') ?? 0,
+      'upah': _formatOfferPrice(budget),
+    };
+  }
+
+  (Color, Color) _categoryPalette(String category) {
+    final lower = category.toLowerCase();
+    if (lower.contains('air'))
+      return (const Color(0xffd0e8ff), const Color(0xff003366));
+    if (lower.contains('listrik'))
+      return (const Color(0xffffddb8), const Color(0xff2c1800));
+    if (lower.contains('darurat'))
+      return (const Color(0xffffdbd7), const Color(0xff430002));
+    return (const Color(0xffe2d4ff), const Color(0xff3a0066));
+  }
+
+  String _formatOfferPrice(dynamic amount) {
+    final value = amount is num ? amount.toInt() : int.tryParse('$amount') ?? 0;
+    return 'Rp ${value.toString().replaceAllMapped(RegExp(r'(\\d{1,3})(?=(\\d{3})+(?!\\d))'), (m) => '${m[1]}.')}';
+  }
+
+  Future<void> _logoutTechnician() async {
+    await AuthService.logout();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const LoginPage()),
+      (_) => false,
+    );
+  }
+
+  Future<void> _openTechnicianOffer(Map<String, dynamic> offer) async {
+    final id = '${offer['_id'] ?? ''}';
+    final detail = await AuthService.getOffer(id);
+    if (!mounted) return;
+    final photos =
+        (detail['photos'] as List?)?.cast<String>() ?? const <String>[];
+    String image = 'assets/images/dummy.png';
+    if (photos.isNotEmpty) {
+      try {
+        image = await AuthService.getMediaUrl(photos.first);
+      } catch (_) {}
+    }
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DetailTawaran(
+          offerId: id,
+          title: '${detail['title'] ?? ''}',
+          customerName:
+              '${(detail['requester_snapshot'] as Map?)?['name'] ?? 'Pengguna'}',
+          previewImage: image,
+          description: '${detail['description'] ?? ''}',
+          addressDetail: '${detail['address_text'] ?? ''}',
+          initialWage: (detail['initial_budget'] as num?)?.toInt() ?? 0,
+        ),
+      ),
+    );
+    _loadNearbyOffers();
+  }
 
   @override
   void initState() {
     super.initState();
     _geocodeEmergencyAddress();
+    _loadTechnicianData();
   }
 
   // Melacak lokasi peta untuk slide ke-2 pada Kartu Darurat berdasarkan _emergencyAddress
@@ -201,13 +302,13 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                   },
                 ),
               ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(0, 5, 0, 15),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(0, 5, 0, 15),
                 child: Text(
-                  "Teknisi",
+                  _technicianProfile?['name'] as String? ?? "Teknisi",
                   textAlign: TextAlign.start,
                   overflow: TextOverflow.clip,
-                  style: TextStyle(
+                  style: const TextStyle(
                     fontWeight: FontWeight.w500,
                     fontStyle: FontStyle.normal,
                     fontSize: 18,
@@ -378,7 +479,7 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                 ),
               ),
               InkWell(
-                onTap: () => Navigator.pop(context),
+                onTap: _logoutTechnician,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   width: MediaQuery.of(context).size.width,
@@ -386,18 +487,14 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        "Tentang Aplikasi",
+                        "Log Out",
                         style: TextStyle(
                           fontWeight: FontWeight.w400,
                           fontSize: 16,
                           color: Color(0xffffffff),
                         ),
                       ),
-                      Icon(
-                        Icons.arrow_forward,
-                        color: Color(0xffffffff),
-                        size: 24,
-                      ),
+                      Icon(Icons.arrow_forward, color: Colors.white, size: 24),
                     ],
                   ),
                 ),
@@ -1076,7 +1173,25 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                 // ==========================================================
                 // LIST TAWARAN SEKITAR DINAMIS (MAKSIMAL 3 ITEM)
                 // ==========================================================
-                if (displayedOffers.isEmpty)
+                if (_isLoadingNearby)
+                  const Padding(
+                    padding: EdgeInsets.all(24),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (_nearbyError != null)
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Column(
+                      children: [
+                        Text(_nearbyError!, textAlign: TextAlign.center),
+                        TextButton(
+                          onPressed: _loadNearbyOffers,
+                          child: const Text('Coba lagi'),
+                        ),
+                      ],
+                    ),
+                  )
+                else if (displayedOffers.isEmpty)
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 8),
                     padding: const EdgeInsets.all(24),
@@ -1102,13 +1217,8 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                         ),
                         const SizedBox(height: 8),
                         TextButton(
-                          onPressed: () {
-                            // Reset ulang dummy untuk keperluan demo ke juri
-                            setState(() {
-                              _showEmergencyCard = true;
-                            });
-                          },
-                          child: const Text("Muat Ulang Data Demo"),
+                          onPressed: _loadNearbyOffers,
+                          child: const Text("Muat Ulang Tawaran"),
                         ),
                       ],
                     ),
@@ -1124,29 +1234,10 @@ class _HomePageTeknisiState extends State<HomePageTeknisi> {
                       judulKerusakan: item["judulKerusakan"],
                       deskripsiKerusakan: item["deskripsiKerusakan"],
                       upah: item["upah"],
-                      onTolakTap: () {
-                        setState(() {
-                          _daftarTawaranSekitar.removeWhere(
-                            (el) => el["id"] == item["id"],
-                          );
-                        });
-                      },
-                      onDetailTap: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => DetailTawaran(
-                              title: item["judulKerusakan"],
-                              customerName: item["namaUser"],
-                              previewImage: "assets/images/dummy.png",
-                              description: item["deskripsiKerusakan"],
-                              mapImage: "assets/images/dummy.png",
-                              addressDetail: item["alamat"],
-                              initialWage: item["upahInt"],
-                            ),
-                          ),
-                        );
-                      },
+                      onTolakTap: null,
+                      onDetailTap: () => _openTechnicianOffer(
+                        Map<String, dynamic>.from(item['offer'] as Map),
+                      ),
                     );
                   }),
 

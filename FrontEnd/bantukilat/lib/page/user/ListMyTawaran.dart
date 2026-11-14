@@ -1,4 +1,7 @@
+import 'dart:convert';
+
 import 'package:bantukilat/page/DetailTawaran.dart';
+import 'package:bantukilat/services/auth_service.dart';
 import 'package:flutter/material.dart';
 
 // ============================================================================
@@ -98,7 +101,7 @@ class MyOfferItem {
   final String userName;
   final int wage;
   final String description;
-  final String previewImage;
+  String previewImage;
   final String addressDetail;
 
   MyOfferItem({
@@ -126,9 +129,98 @@ class ListMyTawaran extends StatefulWidget {
 class _ListMyTawaranState extends State<ListMyTawaran> {
   // null berarti memilih filter "Semua"
   MyOfferStatus? _selectedFilter;
+  bool _isLoading = true;
+  String? _loadError;
 
-  // Dummy Data Tawaran Saya
-  final List<MyOfferItem> _myOffers = [
+  // Data tawaran dari API
+  final List<MyOfferItem> _myOffers = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOffers();
+  }
+
+  Future<void> _loadOffers() async {
+    setState(() {
+      _isLoading = true;
+      _loadError = null;
+    });
+    try {
+      final offers = await AuthService.getMyOffers();
+      final items = <MyOfferItem>[];
+      for (final offer in offers) {
+        final item = _offerFromJson(offer);
+        if (item.previewImage != 'assets/images/dummy.png') {
+          try {
+            final resolved = await AuthService.getMediaUrl(item.previewImage);
+            item.previewImage = resolved;
+          } catch (_) {
+            item.previewImage = 'assets/images/dummy.png';
+          }
+        }
+        items.add(item);
+      }
+      if (!mounted) return;
+      setState(() {
+        _myOffers
+          ..clear()
+          ..addAll(items);
+        _isLoading = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _loadError = error.toString().replaceFirst('Exception: ', '');
+        _isLoading = false;
+      });
+    }
+  }
+
+  MyOfferItem _offerFromJson(Map<String, dynamic> offer) {
+    final status = '${offer['status'] ?? ''}'.toUpperCase();
+    final state = switch (status) {
+      'ASSIGNED' || 'NEGOTIATING' => MyOfferStatus.pengerjaan,
+      'COMPLETED' => MyOfferStatus.selesai,
+      _ => MyOfferStatus.menunggu,
+    };
+    final category = Map<String, dynamic>.from(
+      (offer['category_snapshot'] as Map?) ?? const {},
+    );
+    final categoryName = '${category['label'] ?? category['name'] ?? ''}';
+    final categoryEnum = _categoryFromName(categoryName);
+    final photos =
+        (offer['photos'] as List?)?.cast<String>() ?? const <String>[];
+    final budget = offer['agreed_price'] ?? offer['initial_budget'] ?? 0;
+    return MyOfferItem(
+      id: '${offer['_id']}',
+      status: state,
+      damageCategory: categoryEnum,
+      title: '${offer['title'] ?? ''}',
+      avatar: 'assets/logo/LogoBulat.png',
+      userName: '${(offer['requester_snapshot'] as Map?)?['name'] ?? 'Saya'}',
+      wage: budget is num ? budget.toInt() : int.tryParse('$budget') ?? 0,
+      description: '${offer['description'] ?? ''}',
+      previewImage: photos.isEmpty ? 'assets/images/dummy.png' : photos.first,
+      addressDetail: '${offer['address_text'] ?? ''}',
+    );
+  }
+
+  DamageCategory _categoryFromName(String name) {
+    final value = name.toLowerCase();
+    if (value.contains('listrik')) return DamageCategory.kelistrikan;
+    if (value.contains('air')) return DamageCategory.saluranAir;
+    if (value.contains('atap') || value.contains('dinding'))
+      return DamageCategory.atapDinding;
+    if (value.contains('kunci') || value.contains('pintu'))
+      return DamageCategory.kunciPintu;
+    if (value.contains('teknologi')) return DamageCategory.teknologi;
+    if (value.contains('kendaraan')) return DamageCategory.kendaraan;
+    if (value.contains('angkut')) return DamageCategory.angkutBarang;
+    return DamageCategory.bantuanLainnya;
+  }
+
+  /*
     MyOfferItem(
       id: '1',
       status: MyOfferStatus.pengerjaan,
@@ -195,7 +287,7 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
       description: 'Bantu angkat kardus buku, monitor PC, dan meja lipat dari lantai bawah ke kamar.',
       addressDetail: 'Jl. Manyar Kertoarjo IV',
     ),
-  ];
+  */
 
   // Menghitung jumlah tawaran berdasarkan status secara responsif
   int _countByStatus(MyOfferStatus status) {
@@ -343,7 +435,25 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
                       // --------------------------------------------------------
                       // BAGIAN 3: DAFTAR KARTU TAWARAN SAYA (REUSABLE WIDGET)
                       // --------------------------------------------------------
-                      if (_filteredOffers.isEmpty)
+                      if (_isLoading)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 40),
+                          child: CircularProgressIndicator(),
+                        )
+                      else if (_loadError != null)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          child: Column(
+                            children: [
+                              Text(_loadError!, textAlign: TextAlign.center),
+                              TextButton(
+                                onPressed: _loadOffers,
+                                child: const Text('Coba lagi'),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (_filteredOffers.isEmpty)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 40),
                           child: Text(
@@ -360,6 +470,8 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
                             padding: const EdgeInsets.only(bottom: 12.0),
                             child: MyTawaranCardWidget(
                               key: ValueKey(item.id),
+                              id: item.id,
+                              onRefresh: _loadOffers,
                               status: item.status,
                               damageCategory: item.damageCategory,
                               title: item.title,
@@ -506,6 +618,8 @@ class _ListMyTawaranState extends State<ListMyTawaran> {
 // Dipanggil menggunakan parameter required this
 // ============================================================================
 class MyTawaranCardWidget extends StatelessWidget {
+  final String id;
+  final Future<void> Function() onRefresh;
   final MyOfferStatus status;
   final DamageCategory damageCategory;
   final String title;
@@ -518,6 +632,8 @@ class MyTawaranCardWidget extends StatelessWidget {
 
   const MyTawaranCardWidget({
     Key? key,
+    required this.id,
+    required this.onRefresh,
     required this.status,
     required this.damageCategory,
     required this.title,
@@ -694,15 +810,35 @@ class MyTawaranCardWidget extends StatelessWidget {
                         width: 35,
                         clipBehavior: Clip.antiAlias,
                         decoration: BoxDecoration(shape: BoxShape.circle),
-                        child: Image.asset(
-                          avatar,
-                          fit: BoxFit.cover,
-                          errorBuilder: (context, error, stackTrace) =>
-                              Container(
-                                color: Colors.grey[300],
-                                child: Icon(Icons.person, size: 20),
+                        child: previewImage.startsWith('data:image/')
+                            ? Image.memory(
+                                base64Decode(previewImage.split(',').last),
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    Container(
+                                      color: Colors.grey[300],
+                                      child: const Icon(Icons.image, size: 20),
+                                    ),
+                              )
+                            : previewImage.startsWith('http')
+                            ? Image.network(
+                                previewImage,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    Container(
+                                      color: Colors.grey[300],
+                                      child: const Icon(Icons.image, size: 20),
+                                    ),
+                              )
+                            : Image.asset(
+                                avatar,
+                                fit: BoxFit.cover,
+                                errorBuilder: (context, error, stackTrace) =>
+                                    Container(
+                                      color: Colors.grey[300],
+                                      child: Icon(Icons.person, size: 20),
+                                    ),
                               ),
-                        ),
                       ),
                       Padding(
                         padding: EdgeInsets.fromLTRB(5, 0, 0, 0),
@@ -775,6 +911,7 @@ class MyTawaranCardWidget extends StatelessWidget {
                           context,
                           MaterialPageRoute(
                             builder: (context) => DetailTawaran(
+                              offerId: id,
                               title: title,
                               previewImage: previewImage,
                               description: description,

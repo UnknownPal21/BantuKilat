@@ -7,7 +7,9 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:http/http.dart' as http;
 import 'package:image_picker/image_picker.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:bantukilat/services/auth_service.dart';
 
 class TawaranSaya extends StatefulWidget {
   const TawaranSaya({super.key});
@@ -49,6 +51,97 @@ class _TawaranSayaState extends State<TawaranSaya> {
 
   // State Mode SOS
   bool _isSosActive = true;
+  bool _isSubmitting = false;
+  List<Map<String, dynamic>> _apiCategories = [];
+  String? _selectedCategoryId;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final categories = await AuthService.getCategories();
+      if (!mounted) return;
+      setState(() {
+        _apiCategories = categories;
+        for (final category in categories) {
+          if (_selectedCategories.contains(category['label'])) {
+            _selectedCategoryId = category['_id'] as String;
+            break;
+          }
+        }
+        if (_selectedCategoryId == null && categories.isNotEmpty) {
+          _selectedCategoryId = categories.first['_id'] as String;
+        }
+      });
+    } catch (_) {
+      // Keep form usable and show error when user submits.
+    }
+  }
+
+  Future<void> _submitOffer(int totalEstimation) async {
+    if (_isSubmitting) return;
+    if (_selectedImageBytes == null ||
+        _judulController.text.trim().length < 5 ||
+        _detailController.text.trim().length < 10 ||
+        _alamatController.text.trim().length < 3 ||
+        _currentLat == null ||
+        _currentLng == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Lengkapi foto, judul (min. 5 karakter), detail (min. 10 karakter), alamat, dan lokasi GPS.',
+          ),
+        ),
+      );
+      return;
+    }
+    if (_selectedCategories.isEmpty || _selectedCategoryId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pilih kategori layanan yang tersedia.')),
+      );
+      return;
+    }
+    setState(() => _isSubmitting = true);
+    try {
+      final compressedBytes = await FlutterImageCompress.compressWithList(
+        _selectedImageBytes!,
+        quality: 80,
+        format: CompressFormat.jpeg,
+      );
+      final dataUri = 'data:image/jpeg;base64,${base64Encode(compressedBytes)}';
+      final media = await AuthService.uploadMedia(dataUri);
+      final mediaId = media['id'] as String;
+      await AuthService.createOffer(
+        categoryId: _selectedCategoryId!,
+        title: _judulController.text.trim(),
+        description: _detailController.text.trim(),
+        photos: [mediaId],
+        latitude: _currentLat!,
+        longitude: _currentLng!,
+        address: _alamatController.text.trim(),
+        isSos: _isSosActive,
+        budget: totalEstimation,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Tawaran berhasil dibuat.')));
+      Navigator.pop(context, true);
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isSubmitting = false);
+    }
+  }
 
   // State Tawaran Imbalan Awal (Style sama dengan DetailTawaran)
   // 0 = Rp 15.000, 1 = Rp 25.000, 2 = Rp 40.000, 3 = Custom
@@ -293,8 +386,35 @@ class _TawaranSayaState extends State<TawaranSaya> {
                                 setState(() {
                                   if (isSelected) {
                                     _selectedCategories.remove(name);
+                                    _selectedCategoryId = null;
                                   } else {
-                                    _selectedCategories.add(name);
+                                    _selectedCategories
+                                      ..clear()
+                                      ..add(name);
+                                    final normalized = name
+                                        .toLowerCase()
+                                        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+                                    final apiCategory = _apiCategories.where((
+                                      item,
+                                    ) {
+                                      final label = '${item['label'] ?? ''}'
+                                          .toLowerCase()
+                                          .replaceAll(RegExp(r'[^a-z0-9]'), '');
+                                      final skill =
+                                          '${item['skill_label'] ?? ''}'
+                                              .toLowerCase()
+                                              .replaceAll(
+                                                RegExp(r'[^a-z0-9]'),
+                                                '',
+                                              );
+                                      return label == normalized ||
+                                          skill == normalized ||
+                                          (name == 'Air' &&
+                                              (label.contains('air') ||
+                                                  skill.contains('air')));
+                                    }).firstOrNull;
+                                    _selectedCategoryId =
+                                        apiCategory?['_id'] as String?;
                                   }
                                 });
                                 setModalState(() {});
@@ -1859,72 +1979,9 @@ class _TawaranSayaState extends State<TawaranSaya> {
                     Padding(
                       padding: const EdgeInsets.fromLTRB(0, 20, 0, 10),
                       child: MaterialButton(
-                        onPressed: () {
-                          if (_selectedImageBytes == null) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Mohon unggah atau ambil Foto Bukti Masalah terlebih dahulu!',
-                                ),
-                                backgroundColor: Colors.redAccent,
-                              ),
-                            );
-                            return;
-                          }
-                          if (_judulController.text.trim().isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Mohon isi Judul Kerusakan terlebih dahulu!',
-                                ),
-                                backgroundColor: Colors.redAccent,
-                              ),
-                            );
-                            return;
-                          }
-                          if (_detailController.text.trim().isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Mohon isi Detail Kerusakan terlebih dahulu!',
-                                ),
-                                backgroundColor: Colors.redAccent,
-                              ),
-                            );
-                            return;
-                          }
-                          if (_selectedCategories.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Mohon pilih minimal 1 Kategori Kerusakan!',
-                                ),
-                                backgroundColor: Colors.redAccent,
-                              ),
-                            );
-                            return;
-                          }
-                          if (_alamatController.text.trim().isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              const SnackBar(
-                                content: Text(
-                                  'Mohon lengkapi Detail Alamat terlebih dahulu!',
-                                ),
-                                backgroundColor: Colors.redAccent,
-                              ),
-                            );
-                            return;
-                          }
-
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Permintaan "${_judulController.text.trim()}" dikirim dengan total ${_formatRupiah(totalEstimation)}!',
-                              ),
-                              backgroundColor: const Color(0xff006747),
-                            ),
-                          );
-                        },
+                        onPressed: _isSubmitting
+                            ? null
+                            : () => _submitOffer(totalEstimation),
                         color: const Color(0xff006747),
                         elevation: 0,
                         shape: RoundedRectangleBorder(
@@ -1934,13 +1991,22 @@ class _TawaranSayaState extends State<TawaranSaya> {
                         textColor: const Color(0xffffffff),
                         height: 50,
                         minWidth: MediaQuery.of(context).size.width,
-                        child: Text(
-                          "Kirim Permintaan (${_formatRupiah(totalEstimation)})",
-                          style: const TextStyle(
-                            fontSize: 15,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
+                        child: _isSubmitting
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white,
+                                ),
+                              )
+                            : Text(
+                                "Kirim Permintaan (${_formatRupiah(totalEstimation)})",
+                                style: const TextStyle(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                       ),
                     ),
                   ],

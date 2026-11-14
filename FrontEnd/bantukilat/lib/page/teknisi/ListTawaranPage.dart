@@ -1,4 +1,6 @@
 import 'package:bantukilat/page/DetailTawaran.dart';
+import 'package:bantukilat/services/auth_service.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:flutter/material.dart';
 
 // ============================================================================
@@ -118,6 +120,7 @@ class OfferItem {
   final String description;
   final String previewImage;
   final String addressDetail;
+  final String offerId;
 
   OfferItem({
     required this.id,
@@ -131,7 +134,8 @@ class OfferItem {
     required this.description,
     this.previewImage = 'assets/images/dummy.png',
     this.addressDetail = '',
-  });
+    String? offerId,
+  }) : offerId = offerId ?? id;
 }
 
 // ============================================================================
@@ -147,7 +151,113 @@ class _ListTawaranPageState extends State<ListTawaranPage> {
   OfferCategory? _selectedCategory;
 
   // Dummy Data untuk semua kategori
-  late final List<OfferItem> _allOffers = [
+  final List<OfferItem> _allOffers = [];
+  bool _isLoadingOffers = true;
+  String? _offersError;
+  double _latitude = -7.2575;
+  double _longitude = 112.7521;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOffers();
+  }
+
+  Future<void> _loadOffers() async {
+    setState(() {
+      _isLoadingOffers = true;
+      _offersError = null;
+    });
+    try {
+      try {
+        final position = await Geolocator.getCurrentPosition();
+        _latitude = position.latitude;
+        _longitude = position.longitude;
+      } catch (_) {}
+      final offers = await AuthService.getNearbyOffers(
+        latitude: _latitude,
+        longitude: _longitude,
+        limit: 50,
+      );
+      final items = <OfferItem>[];
+      for (final offer in offers) {
+        final item = await _offerFromJson(offer);
+        items.add(item);
+      }
+      if (!mounted) return;
+      setState(() {
+        _allOffers
+          ..clear()
+          ..addAll(items);
+        _isLoadingOffers = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _offersError = error.toString().replaceFirst('Exception: ', '');
+        _isLoadingOffers = false;
+      });
+    }
+  }
+
+  Future<OfferItem> _offerFromJson(Map<String, dynamic> offer) async {
+    final category = Map<String, dynamic>.from(
+      (offer['category_snapshot'] as Map?) ?? const {},
+    );
+    final label = '${category['label'] ?? category['name'] ?? 'Lainnya'}';
+    final status = '${offer['status'] ?? ''}'.toUpperCase();
+    final state = status == 'ASSIGNED' || status == 'COMPLETED'
+        ? OfferCategory.darurat
+        : _categoryFromName(label);
+    final requester = Map<String, dynamic>.from(
+      (offer['requester_snapshot'] as Map?) ?? const {},
+    );
+    final budget = offer['agreed_price'] ?? offer['initial_budget'] ?? 0;
+    final distance = offer['distance_m'];
+    final created = DateTime.tryParse('${offer['created_at'] ?? ''}');
+    final photos =
+        (offer['photos'] as List?)?.cast<String>() ?? const <String>[];
+    var image = photos.isEmpty ? 'assets/images/dummy.png' : photos.first;
+    if (image != 'assets/images/dummy.png') {
+      try {
+        image = await AuthService.getMediaUrl(image);
+      } catch (_) {}
+    }
+    return OfferItem(
+      id: label,
+      offerId: '${offer['_id']}',
+      category: state,
+      distance: distance is num
+          ? (distance >= 1000
+                ? '${(distance / 1000).toStringAsFixed(1)} KM'
+                : '${distance.round()} Meter')
+          : '',
+      createdAt: created,
+      title: '${offer['title'] ?? ''}',
+      avatar: 'assets/logo/LogoBulat.png',
+      userName: '${requester['name'] ?? 'Pengguna'}',
+      wage: budget is num ? budget.toInt() : int.tryParse('$budget') ?? 0,
+      description: '${offer['description'] ?? ''}',
+      previewImage: image,
+      addressDetail: '${offer['address_text'] ?? ''}',
+    );
+  }
+
+  OfferCategory _categoryFromName(String name) {
+    final value = name.toLowerCase();
+    if (value.contains('listrik')) return OfferCategory.kelistrikan;
+    if (value.contains('air')) return OfferCategory.saluranAir;
+    if (value.contains('atap') || value.contains('dinding'))
+      return OfferCategory.atapDinding;
+    if (value.contains('kunci') || value.contains('pintu'))
+      return OfferCategory.kunciPintu;
+    if (value.contains('teknologi')) return OfferCategory.teknologi;
+    if (value.contains('kendaraan')) return OfferCategory.kendaraan;
+    if (value.contains('angkut')) return OfferCategory.angkutBarang;
+    return OfferCategory.bantuanLainnya;
+  }
+
+  /* DUMMY_OFFERS
     OfferItem(
       id: '1',
       category: OfferCategory.darurat,
@@ -248,7 +358,7 @@ class _ListTawaranPageState extends State<ListTawaranPage> {
       description: 'Baru beli meja kerja masih di dalam kardus, butuh bantuan merakit dengan obeng.',
       addressDetail: 'Jl. Karang Menjangan No. 88',
     ),
-  ];
+  */
 
   // Menghitung jumlah item per kategori secara dinamis
   int _countByCategory(OfferCategory category) {
@@ -328,7 +438,25 @@ class _ListTawaranPageState extends State<ListTawaranPage> {
                       // --------------------------------------------------------
                       // BAGIAN 2: LIST TAWARAN (MENGGUNAKAN REUSABLE WIDGET)
                       // --------------------------------------------------------
-                      if (_filteredOffers.isEmpty)
+                      if (_isLoadingOffers)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 40),
+                          child: CircularProgressIndicator(),
+                        )
+                      else if (_offersError != null)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          child: Column(
+                            children: [
+                              Text(_offersError!, textAlign: TextAlign.center),
+                              TextButton(
+                                onPressed: _loadOffers,
+                                child: const Text('Coba lagi'),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (_filteredOffers.isEmpty)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 40),
                           child: Text(
@@ -345,6 +473,7 @@ class _ListTawaranPageState extends State<ListTawaranPage> {
                             padding: const EdgeInsets.only(bottom: 10.0),
                             child: TawaranCardWidget(
                               key: ValueKey(offer.id),
+                              offerId: offer.offerId,
                               category: offer.category,
                               distance: offer.distance,
                               createdAt: offer.createdAt,
@@ -451,6 +580,7 @@ class _ListTawaranPageState extends State<ListTawaranPage> {
 // - Tipe 2: Kategori Reguler (Kelistrikan, Air, Teknologi, dll dengan warna badge dinamis)
 // ============================================================================
 class TawaranCardWidget extends StatelessWidget {
+  final String offerId;
   final OfferCategory category;
   final String distance;
   final DateTime? createdAt; // Digunakan pada kategori Darurat
@@ -464,6 +594,7 @@ class TawaranCardWidget extends StatelessWidget {
 
   const TawaranCardWidget({
     Key? key,
+    required this.offerId,
     required this.category,
     required this.distance,
     this.createdAt,
@@ -516,6 +647,7 @@ class TawaranCardWidget extends StatelessWidget {
       context,
       MaterialPageRoute(
         builder: (context) => DetailTawaran(
+          offerId: offerId,
           title: title,
           previewImage: previewImage,
           description: description,

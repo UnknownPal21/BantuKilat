@@ -1,4 +1,6 @@
-﻿import 'package:flutter/material.dart';
+import 'package:flutter/material.dart';
+import 'package:bantukilat/page/teknisi/HomePageTeknisi.dart';
+import 'package:bantukilat/services/auth_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 
@@ -19,6 +21,69 @@ class _RegisterTeknisiState extends State<RegisterTeknisi> {
   final TextEditingController _alamatController = TextEditingController();
   bool _isObscure = true;
   bool _isLoadingLocation = false;
+  bool _isRegistering = false;
+
+  Future<void> _registerTechnician() async {
+    if (_isRegistering) return;
+    if (!_agreedToTerms || !_agreedToTerms2) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Setujui seluruh ketentuan terlebih dahulu.'),
+        ),
+      );
+      return;
+    }
+    setState(() => _isRegistering = true);
+    try {
+      if (_namalengkapController.text.trim().isEmpty ||
+          _emailController.text.trim().isEmpty ||
+          _whatsappController.text.trim().length < 8 ||
+          _passwordController.text.length < 8 ||
+          _kotaController.text.trim().isEmpty ||
+          _kecamatanController.text.trim().isEmpty ||
+          _selectedSkills.isEmpty) {
+        throw Exception(
+          'Lengkapi nama, email, nomor (min. 8 digit), password (min. 8 karakter), kota, kecamatan, dan keahlian.',
+        );
+      }
+      final result = await AuthService.register(
+        role: 'TECHNICIAN',
+        name: _namalengkapController.text.trim(),
+        email: _emailController.text.trim(),
+        phone: _whatsappController.text.trim(),
+        password: _passwordController.text,
+        city: _kotaController.text.trim(),
+        district: _kecamatanController.text.trim(),
+        skills: _selectedSkills.toList(),
+        termsAccepted: true,
+      );
+      if (!mounted) return;
+      final user = Map<String, dynamic>.from(result['user'] as Map);
+      if (user['role'] == 'TECHNICIAN') {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const HomePageTeknisi()),
+          (_) => false,
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Akun teknisi berhasil dibuat. Silakan masuk.'),
+          ),
+        );
+        Navigator.pop(context);
+      }
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isRegistering = false);
+    }
+  }
 
   double? _currentLat;
   double? _currentLng;
@@ -1277,9 +1342,7 @@ class _RegisterTeknisiState extends State<RegisterTeknisi> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(0, 10, 0, 35),
                 child: MaterialButton(
-                  onPressed: () {
-                    // Aksi login menggunakan _emailController.text dan _passwordController.text
-                  },
+                  onPressed: _isRegistering ? null : _registerTechnician,
                   color: const Color(0xff006747),
                   elevation: 0,
                   shape: RoundedRectangleBorder(
@@ -1293,17 +1356,32 @@ class _RegisterTeknisiState extends State<RegisterTeknisi> {
                     crossAxisAlignment: CrossAxisAlignment.center,
                     mainAxisAlignment: MainAxisAlignment.center,
 
-                    children: [
-                      Text(
-                        "Lanjut Ke Verifikasi Dokumen  ",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          fontStyle: FontStyle.normal,
-                        ),
-                      ),
-                      Icon(Icons.arrow_forward, color: Colors.white, size: 20),
-                    ],
+                    children: _isRegistering
+                        ? const [
+                            SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ]
+                        : [
+                            Text(
+                              "Lanjut Ke Verifikasi Dokumen  ",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                fontStyle: FontStyle.normal,
+                              ),
+                            ),
+                            Icon(
+                              Icons.arrow_forward,
+                              color: Colors.white,
+                              size: 20,
+                            ),
+                          ],
                   ),
                 ),
               ),

@@ -1,4 +1,6 @@
 import 'package:bantukilat/page/DetailTawaran.dart';
+import 'package:bantukilat/services/auth_service.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:flutter/material.dart';
 
 // ============================================================================
@@ -27,6 +29,7 @@ class TaskItem {
   final String description;
   final String previewImage;
   final String addressDetail;
+  final String? bidId;
 
   TaskItem({
     required this.id,
@@ -40,6 +43,7 @@ class TaskItem {
     required this.description,
     this.previewImage = 'assets/images/dummy.png',
     this.addressDetail = '',
+    this.bidId,
   });
 }
 
@@ -55,8 +59,88 @@ class _TugasSayaState extends State<TugasSaya> {
   // null berarti memilih filter "Semua"
   TaskCategory? _selectedFilter;
 
-  // Dummy Data
-  final List<TaskItem> _allTasks = [
+  bool _isLoadingTasks = true;
+  String? _tasksError;
+  double _latitude = -7.2575;
+  double _longitude = 112.7521;
+  final List<TaskItem> _allTasks = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTasks();
+  }
+
+  Future<void> _loadTasks() async {
+    setState(() {
+      _isLoadingTasks = true;
+      _tasksError = null;
+    });
+    try {
+      try {
+        final position = await Geolocator.getCurrentPosition();
+        _latitude = position.latitude;
+        _longitude = position.longitude;
+      } catch (_) {}
+      final tasks = await AuthService.getMyTasks(
+        latitude: _latitude,
+        longitude: _longitude,
+      );
+      final items = <TaskItem>[];
+      for (final task in tasks) {
+        final categorySnapshot = Map<String, dynamic>.from(
+          (task['category_snapshot'] as Map?) ?? const {},
+        );
+        final requester = Map<String, dynamic>.from(
+          (task['requester_snapshot'] as Map?) ?? const {},
+        );
+        final status = '${task['status'] ?? ''}'.toUpperCase();
+        final category = status == 'COMPLETED'
+            ? TaskCategory.selesai
+            : TaskCategory.ditugaskan;
+        final budget = task['agreed_price'] ?? task['initial_budget'] ?? 0;
+        final photos =
+            (task['photos'] as List?)?.cast<String>() ?? const <String>[];
+        var preview = photos.isEmpty ? 'assets/images/dummy.png' : photos.first;
+        if (preview != 'assets/images/dummy.png') {
+          try {
+            preview = await AuthService.getMediaUrl(preview);
+          } catch (_) {}
+        }
+        items.add(
+          TaskItem(
+            id: '${task['_id']}',
+            bidId: (task['accepted_bid'] as Map?)?['_id']?.toString(),
+            category: category,
+            statusSubtitle: status == 'COMPLETED' ? 'Selesai' : '',
+            distance: '',
+            title: '${task['title'] ?? categorySnapshot['label'] ?? ''}',
+            profileImage: 'assets/logo/LogoBulat.png',
+            clientName: '${requester['name'] ?? 'Pengguna'}',
+            wage: budget is num ? budget.toInt() : int.tryParse('$budget') ?? 0,
+            description: '${task['description'] ?? ''}',
+            previewImage: preview,
+            addressDetail: '${task['address_text'] ?? ''}',
+          ),
+        );
+      }
+      if (!mounted) return;
+      setState(() {
+        _allTasks
+          ..clear()
+          ..addAll(items);
+        _isLoadingTasks = false;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _tasksError = error.toString().replaceFirst('Exception: ', '');
+        _isLoadingTasks = false;
+      });
+    }
+  }
+
+  /* DUMMY_TASKS
     TaskItem(
       id: '1',
       category: TaskCategory.ditugaskan,
@@ -96,7 +180,7 @@ class _TugasSayaState extends State<TugasSaya> {
       previewImage: 'assets/images/dummy.png',
       addressDetail: 'Gg. Pacar Kembang II No. 14',
     ),
-  ];
+  */
 
   // Helper untuk menghitung jumlah tugas per kategori secara responsif
   int _countByCategory(TaskCategory category) {
@@ -112,22 +196,27 @@ class _TugasSayaState extends State<TugasSaya> {
   }
 
   // Fungsi untuk mengubah status tugas menjadi selesai saat di-slide ke kanan
-  void _completeTask(String taskId) {
-    setState(() {
-      final index = _allTasks.indexWhere((t) => t.id == taskId);
-      if (index != -1) {
-        _allTasks[index].category = TaskCategory.selesai;
-      }
-    });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Tugas berhasil dikonfirmasi selesai!'),
-        backgroundColor: Color(0xff006b4a),
-        behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 2),
-      ),
-    );
+  Future<void> _completeTask(String taskId) async {
+    try {
+      await AuthService.completeOffer(taskId);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Tugas berhasil dikonfirmasi selesai!'),
+          backgroundColor: Color(0xff006b4a),
+          behavior: SnackBarBehavior.floating,
+          duration: Duration(seconds: 2),
+        ),
+      );
+      await _loadTasks();
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    }
   }
 
   @override
@@ -247,7 +336,25 @@ class _TugasSayaState extends State<TugasSaya> {
                       // --------------------------------------------------------
                       // BAGIAN 3: DAFTAR KARTU TUGAS (REUSABLE WIDGET)
                       // --------------------------------------------------------
-                      if (_filteredTasks.isEmpty)
+                      if (_isLoadingTasks)
+                        const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 40),
+                          child: CircularProgressIndicator(),
+                        )
+                      else if (_tasksError != null)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 20),
+                          child: Column(
+                            children: [
+                              Text(_tasksError!, textAlign: TextAlign.center),
+                              TextButton(
+                                onPressed: _loadTasks,
+                                child: const Text('Coba lagi'),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (_filteredTasks.isEmpty)
                         Padding(
                           padding: const EdgeInsets.symmetric(vertical: 40),
                           child: Text(
@@ -274,6 +381,7 @@ class _TugasSayaState extends State<TugasSaya> {
                               description: task.description,
                               previewImage: task.previewImage,
                               addressDetail: task.addressDetail,
+                              bidId: task.bidId,
                               onSlideCompleted: () => _completeTask(task.id),
                             ),
                           );
@@ -407,6 +515,7 @@ class _TugasSayaState extends State<TugasSaya> {
 // Bisa dipanggil di mana saja dengan mengirimkan parameter yang dibutuhkan.
 // ============================================================================
 class TaskCardWidget extends StatelessWidget {
+  final String? bidId;
   final TaskCategory category;
   final String statusSubtitle;
   final String distance;
@@ -421,6 +530,7 @@ class TaskCardWidget extends StatelessWidget {
 
   const TaskCardWidget({
     Key? key,
+    this.bidId,
     required this.category,
     this.statusSubtitle = '',
     required this.distance,
@@ -678,6 +788,8 @@ class TaskCardWidget extends StatelessWidget {
                           context,
                           MaterialPageRoute(
                             builder: (context) => DetailTawaran(
+                              offerId: null,
+                              bidId: bidId,
                               title: title,
                               previewImage: previewImage,
                               description: description,

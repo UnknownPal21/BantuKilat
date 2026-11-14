@@ -1,5 +1,6 @@
 import 'package:bantukilat/page/loginpage.dart';
 import 'package:flutter/material.dart';
+import 'package:bantukilat/services/auth_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 
@@ -23,6 +24,41 @@ class _RegisterPageState extends State<RegisterPage> {
 
   bool _isObscure = true;
   bool _isLoadingLocation = false;
+  bool _isRegistering = false;
+
+  Future<void> _register() async {
+    if (_isRegistering) return;
+    setState(() => _isRegistering = true);
+    try {
+      await AuthService.register(
+        role: 'USER',
+        name: _nameController.text.trim(),
+        email: _emailController.text.trim(),
+        phone: _whatsappController.text.trim(),
+        password: _passwordController.text,
+        city: _kotaController.text.trim(),
+        district: _kecamatanController.text.trim(),
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Akun berhasil dibuat. Silakan masuk.')),
+      );
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginPage()),
+        (_) => false,
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(error.toString().replaceFirst('Exception: ', '')),
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _isRegistering = false);
+    }
+  }
 
   // Koordinat disimpan untuk dikirim ke FastAPI saat registrasi / order (fitur 500m)
   double? _currentLat;
@@ -946,9 +982,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   Padding(
                     padding: const EdgeInsets.fromLTRB(0, 15, 0, 15),
                     child: MaterialButton(
-                      onPressed: () {
-                        // Aksi Register menggunakan data controller + _currentLat & _currentLng
-                      },
+                      onPressed: _isRegistering ? null : _register,
                       color: const Color(0xff006747),
                       elevation: 0,
                       shape: RoundedRectangleBorder(
@@ -958,14 +992,23 @@ class _RegisterPageState extends State<RegisterPage> {
                       textColor: const Color(0xffffffff),
                       height: 50,
                       minWidth: MediaQuery.of(context).size.width * 0.85,
-                      child: const Text(
-                        "Daftar Sekarang",
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          fontStyle: FontStyle.normal,
-                        ),
-                      ),
+                      child: _isRegistering
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Color.fromARGB(255, 0, 0, 0),
+                              ),
+                            )
+                          : const Text(
+                              "Daftar Sekarang",
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                fontStyle: FontStyle.normal,
+                              ),
+                            ),
                     ),
                   ),
                   Padding(
