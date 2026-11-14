@@ -459,3 +459,23 @@ async def mine(user: dict, status: OfferStatus | None, limit: int) -> list[dict]
     cursor = db.offers.find(query).sort("created_at", -1).limit(limit)
     docs = await cursor.to_list(length=limit)
     return [_offer_response(doc) for doc in docs]
+
+
+async def tasks(
+    user: dict,
+    status: OfferStatus | None,
+    limit: int,
+) -> list[dict]:
+    """Tawaran yang ditugaskan ke teknisi ini.
+
+    Endpoint terpisah, bukan filter di `/offers/nearby`: nearby sengaja hanya
+    berisi offer terbuka (WAITING/NEGOTIATING) untuk radar bid. Tanpa endpoint
+    ini, tugas yang sudah ASSIGNED/COMPLETED tidak pernah bisa ditampilkan.
+    """
+    query: dict = {"technician_id": user["_id"]}
+    if status is not None:
+        query["status"] = status
+
+    cursor = db.offers.find(query).sort("updated_at", -1).limit(limit)
+    docs = await cursor.to_list(length=limit)
+    return [_offer_response(doc) for doc in docs]

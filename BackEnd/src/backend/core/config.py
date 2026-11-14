@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     expire_job_enabled: bool = True
     expire_check_seconds: int = 60
 
+    # FastAPI Cloud tidak punya hook pre-start: index, validator, dan seed
+    # kategori dipasang saat startup. Aman dijalankan banyak instance karena
+    # semua operasi di setup() idempoten (createIndex / upsert per code).
+    # Kegagalan di sini dicatat sebagai warning, bukan mematikan server: app
+    # tetap bisa melayani endpoint yang tidak butuh collection baru.
+    setup_on_startup: bool = True
+
     # Provider AI apa pun yang bicara protokol OpenAI-compatible. Default
     # Gemini; ganti tiga nilai ini untuk pindah ke OpenAI/OpenRouter/Groq
     # tanpa menyentuh kode.

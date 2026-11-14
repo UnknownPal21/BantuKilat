@@ -189,6 +189,8 @@ async def ensure_offers() -> None:
     await db.offers.create_index(
         [("technician_id", 1), ("status", 1), ("updated_at", -1)]
     )
+    # Dipakai GET /offers/tasks: tugas teknisi, terbaru dulu, tanpa filter status.
+    await db.offers.create_index([("technician_id", 1), ("updated_at", -1)])
     await db.offers.create_index([("is_sos", 1), ("expires_at", 1)])
     # Dipakai job expire_overdue: cari offer terbuka yang sudah lewat waktu.
     await db.offers.create_index(

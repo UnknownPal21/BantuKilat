@@ -1,153 +1,470 @@
 # BantuKilat
 
-Aplikasi bantu-tetangga untuk kerusakan rumah kecil: **foto kerusakan → AI menebak jenis kerusakan + rentang harga wajar → teknisi di sekitar mengajukan penawaran → user memilih → tugas selesai.**
+> **Foto kerusakan rumah → AI menebak jenis kerusakan + rentang harga wajar → teknisi di sekitar mengajukan penawaran → kamu memilih → tugas selesai.**
 
-Dibuat untuk Hackathon Logicodex 2026.
-
-> **Status:** Backend sudah berjalan dan teruji (26 tes otomatis). Frontend Flutter masih berupa prototipe UI — halaman sudah ada, tetapi belum tersambung ke API. Detail di [Status proyek](#status-proyek).
-
----
+Aplikasi bantu-tetangga untuk kerusakan rumah kecil (kran bocor, MCB anjlok, printer error, angkat gas, dll).
 
 ## Daftar isi
 
-- [Masalah yang dipecahkan](#masalah-yang-dipecahkan)
-- [Cara kerja singkat](#cara-kerja-singkat)
-- [Fitur](#fitur)
-- [Arsitektur](#arsitektur)
-- [Requirement](#requirement)
-- [Menjalankan backend](#menjalankan-backend)
-- [Menjalankan frontend](#menjalankan-frontend)
-- [Panduan API cepat](#panduan-api-cepat)
-- [Struktur folder](#struktur-folder)
-- [Konfigurasi](#konfigurasi)
-- [Tes](#tes)
-- [Script bantu](#script-bantu)
-- [Masalah umum](#masalah-umum)
-- [Status proyek](#status-proyek)
+1. [Masalah yang dipecahkan](#1-masalah-yang-dipecahkan)
+2. [Arsitektur & alur data](#2-arsitektur-alur-data)
+3. [Rancangan data MongoDB](#3-rancangan-data-mongodb)
+4. [Mesin harga: kenapa AI tidak menulis rupiah](#4-mesin-harga-kenapa-ai-tidak-menulis-rupiah)
+5. [Instalasi localhost](#5-instalasi-localhost)
+6. [Referensi API](#6-referensi-api)
+7. [Tes & kualitas](#7-tes-kualitas)
+8. [Deploy & status proyek](#8-deploy-status-proyek)
 
 ---
 
-## Masalah yang dipecahkan
+## 1. Masalah yang dipecahkan
 
 Orang awam tidak tahu dua hal saat barang di rumah rusak:
 
-1. **Ini kerusakan apa?** (kran bocor karena seal, atau karena pipa retak?)
-2. **Harga wajarnya berapa?** (Rp 50 ribu atau Rp 500 ribu?)
+1. **Ini kerusakan apa?** kran bocor karena seal, atau karena pipa retak?
+2. **Harga wajarnya berapa?** Rp 50 ribu atau Rp 500 ribu?
 
-Akibatnya user takut ditipu, dan teknisi harus bolak-balik bertanya lewat chat. BantuKilat memotong dua langkah itu: user cukup **foto + deskripsi singkat**, lalu langsung mendapat dugaan kerusakan dan estimasi harga yang diambil dari data transaksi historis — bukan angka karangan model AI.
+Akibatnya user takut ditipu, dan teknisi harus bolak-balik bertanya lewat chat.
 
-## Cara kerja singkat
+BantuKilat memotong dua langkah itu: user cukup **foto + deskripsi singkat**, lalu langsung mendapat dugaan kerusakan dan estimasi harga yang diambil dari **data transaksi historis**, bukan angka karangan model AI.
 
-```
-User                     Backend                         Teknisi
- │
- │ 1. Foto kerusakan ───► POST /media          (foto disimpan, bukan base64)
- │
- │ 2. "Kran bocor"  ─────► POST /ai/chats/{id}/messages
- │                          ├─ AI klasifikasi kategori + keparahan
- │                          └─ harga diambil dari price_catalog
- │    ◄── estimate + narasi + saran keselamatan
- │
- │ 3. Buat tawaran  ─────► POST /offers         ──► muncul di /offers/nearby
- │                                                       │
- │                                                       │ 4. Ajukan harga
- │    ◄──────────────────────────   POST /offers/{id}/bids
- │
- │ 5. Terima satu bid ───► POST /bids/{id}/accept   (bid lain otomatis ditolak)
- │
- │ 6. Teknisi selesai ───► POST /offers/{id}/complete
- │                          └─ harga deal masuk katalog → AI makin akurat
-```
-
-**Prinsip harga:** model AI **tidak pernah** menulis nominal rupiah. Model hanya menentukan *kategori* dan *keparahan*. Angka rupiah selalu disusun server dari `price_catalog`. Kalau data belum cukup, server bilang tidak tahu — tidak menebak.
-
-## Fitur
-
-### Sudah jalan (backend)
-
-| Fitur | Ringkasan |
-|---|---|
-| **Auth** | Register/login (USER & TECHNICIAN), JWT, `GET /auth/me`, update nomor HP |
-| **Kategori** | 7 kategori seeded (Kelistrikan, Air, Kendaraan, Angkut Barang, Teknologi, Bantuan Lain, Pertukangan) |
-| **Tawaran (offer)** | Buat, lihat detail, daftar sekitar berbasis radius (`$geoNear`), daftar milik sendiri, auto-expired setelah 30 menit |
-| **Penawaran (bid)** | Teknisi mengajukan harga; satu bid `PENDING` per teknisi per offer; accept atomik (bid lain → `REJECTED`) |
-| **Chat AI** | Percakapan + pesan teks/foto, estimasi ber-grounding katalog, saran keselamatan, riwayat 10 pesan sebagai konteks |
-| **Media** | Upload JPEG terkompresi (≤1024 px), URL bertanda tangan HMAC + kedaluwarsa, batas harian |
-| **Katalog harga** | 2.520 sampel seed + 84 baris katalog; fallback kota → nasional; sampel `DEAL` otomatis dari tawaran selesai |
-| **Kuota** | Kuota harian atomik per akun: chat, estimasi, pesan berfoto |
-
-### Belum ada
-
-- Frontend tersambung ke API (login, daftar tawaran, bid, chat AI)
-- Ulasan/rating (`reviews` sudah dirancang di skema, belum dikodekan)
-- Job cron `EXPIRED` (saat ini offer kedaluwarsa disaring di query, status di DB belum diubah)
-- Batal tawaran (`CANCELLED`), tolak/tarik bid manual
-- Notifikasi / push
-
-## Arsitektur
+### Alur utama
 
 ```
-FrontEnd/bantukilat/     Flutter (Android / iOS / web), rendering UI
-        │  HTTP + JWT
+User                          Backend                          Teknisi
+ │
+ │ 1. Foto kerusakan ────────► POST /media          (foto disimpan, bukan base64)
+ │
+ │ 2. "Kran bocor" ──────────► POST /ai/chats/{id}/messages
+ │                              ├─ AI klasifikasi kategori + keparahan
+ │                              └─ harga diambil dari price_catalog
+ │    ◄─── estimate + narasi + saran keselamatan
+ │
+ │ 3. Buat tawaran ──────────► POST /offers        ──►  GET /offers/nearby
+ │                                                          │
+ │                                                          │ 4. Ajukan harga
+ │    ◄────────────────────────────────  POST /offers/{id}/bids
+ │
+ │ 5. Terima satu bid ───────► POST /bids/{id}/accept   (bid lain → REJECTED)
+ │
+ │ 6. Teknisi selesai ───────► POST /offers/{id}/complete
+ │                              └─ harga deal masuk katalog → AI makin akurat
+ │
+ │ 7. Ambil pekerjaan ───────► GET /offers/tasks  (ASSIGNED / COMPLETED)
+```
+
+### Siklus status tawaran
+
+Semua status punya jalan masuk **dan** jalan keluar. Tidak ada status yang bisa dicapai tanpa endpoint.
+
+```
+                 ┌──────────────── reject semua bid ────────────────┐
+                 ▼                                                  │
+  (baru) ──► WAITING ──bid masuk──► NEGOTIATING ──accept──► ASSIGNED ──complete──► COMPLETED
+                │                        │
+                │ cancel                 │ cancel
+                ▼                        ▼
+            CANCELLED ◄─────────────────┘
+
+  WAITING / NEGOTIATING ──expires_at lewat (job)──► EXPIRED
+```
+
+| Transisi                          | Endpoint                                                    | Siapa          |
+| --------------------------------- | ----------------------------------------------------------- | -------------- |
+| `WAITING → NEGOTIATING`           | `POST /offers/{id}/bids`                                    | teknisi        |
+| `NEGOTIATING → WAITING`           | `POST /bids/{id}/reject` (semua bid habis) atau `/withdraw` | user / teknisi |
+| `NEGOTIATING → ASSIGNED`          | `POST /bids/{id}/accept`                                    | user           |
+| `ASSIGNED → COMPLETED`            | `POST /offers/{id}/complete`                                | teknisi        |
+| `WAITING/NEGOTIATING → CANCELLED` | `POST /offers/{id}/cancel`                                  | user           |
+| `WAITING/NEGOTIATING → EXPIRED`   | job latar belakang                                          | sistem         |
+
+---
+
+## 2. Arsitektur & alur data
+
+```
+FrontEnd/bantukilat/        Flutter (UI), penyimpanan token (flutter_secure_storage)
+        │
+        │  HTTP + JWT (Authorization: Bearer …)
         ▼
-BackEnd/                 FastAPI (Python 3.12)
-        ├── routers/     endpoint HTTP
-        ├── services/    logika bisnis (offer, bid, ai, media, harga)
-        ├── models/      skema request/response Pydantic
-        └── db/          koneksi + index + seed
-                │  async (AsyncMongoClient)
+BackEnd/src/backend/        FastAPI
+        ├── routers/        endpoint HTTP, validasi auth/role
+        ├── services/       logika bisnis (offer, bid, ai, media, harga, auth)
+        ├── models/         skema Pydantic request & response
+        ├── core/           config, JWT, error handler, rate limit, scheduler
+        └── db/             koneksi, index, validator, seed kategori
+                │
+                │  driver async (AsyncMongoClient)
                 ▼
         MongoDB Atlas
-        users · categories · offers · bids
-        media · ai_conversations · ai_messages
-        price_samples · price_catalog · ai_usage
 ```
 
-- **Backend:** FastAPI, MongoDB (driver async `AsyncMongoClient`), Python 3.12.
-- **AI:** provider apa pun yang bicara **protokol OpenAI-compatible** (Gemini, DeepSeek, OpenAI, OpenRouter, Groq). Diatur lewat tiga env var — tanpa ubah kode.
-- **Fallback tanpa API key:** server memakai pengklasifikasi kata kunci lokal (`model: "local-heuristic"`), jadi demo tetap jalan dan gratis.
+### Contoh nyata: satu request offer, dari Flutter sampai Mongo
 
-## Requirement
+Misal Flutter memanggil `POST /offers`.
 
-| Perlu | Versi / catatan |
-|---|---|
-| Python | **3.12+** |
-| [uv](https://docs.astral.sh/uv/) | pengelola paket Python (`pip install uv`) |
-| MongoDB | **Atlas** (cloud) atau MongoDB lokal. Wajib mendukung geospatial `2dsphere` |
-| Flutter | **3.27+** (project memakai Dart SDK `^3.13.7`) |
-| Android Studio / SDK | hanya jika menjalankan di emulator/HP Android |
-| (opsional) API key AI | tanpa ini aplikasi tetap jalan dengan fallback lokal |
+**1. Flutter** (`lib/services/auth_service.dart`)
 
-## Menjalankan backend
+```dart
+await http.post(Uri.parse('$_baseUrl/offers'),
+  headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+  body: jsonEncode({
+    'category_id': categoryId,
+    'title': 'Kran wastafel bocor',
+    'photos': [photoId],          // id hasil POST /media
+    'lng': 112.7531, 'lat': -7.2412,
+    ...
+  }));
+```
 
-### 1. Masuk ke folder backend
+**2. Router** (`routers/offers.py`), `require_role` tidak dipakai karena
+offer boleh dibuat akun apa pun; yang wajib hanya token valid.
+
+```python
+user: dict = Depends(get_current_user)   # dari header Bearer
+```
+
+**3. Model** (`models/offer.py` → `OfferCreateIn`) memvalidasi panjang teks,
+rentang `lng/lat`, dan menolak `extra` field. Field tak dikenal langsung 422.
+
+**4. Service** (`services/offer_service.py::create`)
+
+- `photos` dinormalisasi: id media **atau** URL `/media/<id>` → id.
+- Id diverifikasi pemiliknya (`media.owner_id == user`), kalau bukan → `422 PHOTO_NOT_FOUND`.
+- Snapshot dibekukan: `requester_snapshot` (nama) dan `category_snapshot` (label, icon).
+- `geo_index` diturunkan dari alamat (`city`, `district`) untuk keperluan fallback harga.
+- `expires_at = now + 30 menit`, `status = "WAITING"`, `bid_count = 0`.
+
+**5. Mongo** menulis satu dokumen ke `offers`. Validator collection ikut
+memeriksa bentuk dokumen; dokumen cacat ditolak database, bukan hanya aplikasi.
+
+**6. Response** dibentuk `_offer_response()`, ObjectId diubah `str`, waktu
+diubah ISO-8601 UTC dengan akhiran `Z`, dan `photos` dikembalikan sebagai
+**URL bertanda tangan** (bukan id mentah).
+
+Contoh response asli (diambil dari server, id disingkat):
+
+```json
+{
+  "_id": "6af85a87e1422422ec75f409",
+  "requester_id": "6af85a86e1422422ec75f407",
+  "requester_snapshot": {
+    "name": "Sari",
+    "avatar_url": null,
+    "rt": null,
+    "rw": null
+  },
+  "category_id": "6af85a84f27de2bc473d4081",
+  "category_snapshot": { "code": "PLUMBING", "label": "Air", "icon": "🚰" },
+  "title": "Kran wastafel bocor",
+  "description": "Air menetes terus sejak pagi, lantai basah.",
+  "photos": ["<PUBLIC_BASE_URL>/media/<id>?exp=1794664599&sig=234db4...7fdcf"],
+  "location": { "type": "Point", "coordinates": [112.7531, -7.2412] },
+  "address_text": "Jl. Mulyorejo Tengah No. 45",
+  "geo_index": {
+    "rt": null,
+    "rw": null,
+    "district": "Mulyorejo",
+    "city": "Surabaya"
+  },
+  "is_sos": false,
+  "sos_fee": 0,
+  "initial_budget": 20000,
+  "agreed_price": null,
+  "status": "WAITING",
+  "accepted_bid_id": null,
+  "technician_id": null,
+  "bid_count": 0,
+  "created_at": "2026-11-14T12:56:39.265371Z",
+  "updated_at": "2026-11-14T12:56:39.265371Z",
+  "expires_at": "2026-11-14T13:26:39.265371Z",
+  "assigned_at": null,
+  "completed_at": null,
+  "cancelled_at": null,
+  "cancel_reason": null
+}
+```
+
+`distance_m` hanya muncul di `GET /offers/nearby` (hasil `$geoNear`).
+
+---
+
+## 3. Rancangan data MongoDB
+
+**Pendekatan: hybrid reference + display snapshot.**
+
+- Relasi tetap memakai `_id` (normalized), bukan menyalin dokumen utuh.
+- Field yang **ditampilkan di layar** dibekukan saat transaksi berlangsung.
+
+Contoh: `bids.technician_snapshot.name` adalah nama teknisi **saat menawar**,
+bukan nama sekarang. Ini disengaja — kalau teknisi mengganti nama besok,
+penawaran kemarin tetap menampilkan nama yang dilihat user saat memutuskan.
+
+Keuntungannya: satu layar butuh 1–2 query, bukan 6 join.
+
+### Konvensi
+
+| Aturan     | Nilai                                                             |
+| ---------- | ----------------------------------------------------------------- |
+| `_id`      | `ObjectId`                                                        |
+| Waktu      | `datetime` UTC; response selalu ISO-8601 berakhiran `Z`           |
+| Uang       | `int` rupiah. Tidak pernah `float`                                |
+| Enum       | `UPPER_SNAKE` string                                              |
+| Koordinat  | GeoJSON `{"type":"Point","coordinates":[lng, lat]}`, **lng dulu** |
+| Email      | lowercase, dinormalisasi di model                                 |
+| Nama field | `snake_case`                                                      |
+
+### 10 collection
+
+| Collection         | Isi                                                       | Volume      |
+| ------------------ | --------------------------------------------------------- | ----------- |
+| `users`            | Akun user & teknisi (satu koleksi, field `role`)          | kecil       |
+| `categories`       | Tujuh kategori (6 aktif + `CARPENTRY` sebagai chip skill) | ~7 dokumen  |
+| `offers`           | Permintaan bantuan                                        | sedang      |
+| `bids`             | Penawaran teknisi                                         | sedang      |
+| `media`            | Byte foto (JPEG terkompresi)                              | **besar**   |
+| `ai_conversations` | Percakapan chat AI                                        | sedang      |
+| `ai_messages`      | Pesan chat + hasil estimasi                               | besar       |
+| `ai_usage`         | Counter kuota harian per user                             | TTL 30 hari |
+| `price_samples`    | Riwayat harga (seed + deal nyata)                         | 2.520 seed  |
+| `price_catalog`    | Agregat harga per kategori × keparahan × kota             | 84 baris    |
+
+`reviews` **belum dibuat**, dirancang tapi belum dikodekan (lihat §8).
+
+### Field penting `offers`
+
+| Field                | Tipe        | Catatan                                                                   |
+| -------------------- | ----------- | ------------------------------------------------------------------------- |
+| `status`             | enum        | `WAITING`, `NEGOTIATING`, `ASSIGNED`, `COMPLETED`, `CANCELLED`, `EXPIRED` |
+| `requester_snapshot` | objek       | nama pemohon **saat** offer dibuat                                        |
+| `category_snapshot`  | objek       | `code`, `label`, `icon` saat offer dibuat                                 |
+| `photos`             | array id    | id media; **diubah jadi URL** di response                                 |
+| `bid_count`          | int         | **dihitung ulang** dari bid `PENDING`, bukan `$inc`                       |
+| `expires_at`         | date        | 30 menit; dipakai job `EXPIRED` dan filter query                          |
+| `cancel_reason`      | enum        | `SUDAH_SELESAI`, `SALAH_INPUT`, `TERLALU_LAMA`, `LAINNYA`, `KEDALUWARSA`  |
+| `agreed_price`       | int \| null | harga bid yang diterima                                                   |
+
+### Field penting `bids`
+
+| Field                 | Catatan                                                   |
+| --------------------- | --------------------------------------------------------- |
+| `status`              | `PENDING`, `ACCEPTED`, `REJECTED`, `WITHDRAWN`, `EXPIRED` |
+| `technician_snapshot` | `name`, `avatar_url`, `rating` **saat menawar**           |
+| `amount`              | int rupiah                                                |
+
+`technician_snapshot` sengaja **tidak** memuat `_id` teknisi. `technician_id`
+sudah ada di level atas dokumen.
+
+### Index yang benar-benar dipasang
+
+Bukan keseluruhan plan, ini yang dibuat `db/setup.py` dan terverifikasi ada
+di database:
+
+| Collection      | Index                                                           | Kegunaan                                  |
+| --------------- | --------------------------------------------------------------- | ----------------------------------------- |
+| `users`         | `email` **unique**                                              | cegah akun ganda                          |
+| `users`         | `phone` unique (partial, hanya string)                          | cegah nomor ganda; akun Google boleh null |
+| `users`         | `google_sub` unique (partial)                                   | login Google                              |
+| `bids`          | `{offer_id, technician_id}` **unique partial** `status=PENDING` | **satu bid aktif per teknisi per offer**  |
+| `offers`        | `location` `2dsphere`                                           | `$geoNear` di `/nearby`                   |
+| `offers`        | `{status, expires_at}` partial `WAITING/NEGOTIATING`            | job `EXPIRED`                             |
+| `offers`        | `{technician_id, updated_at}`                                   | `GET /offers/tasks`                       |
+| `offers`        | `{requester_id, status, created_at}`                            | `GET /offers/mine`                        |
+| `offers`        | `{status, category_id, created_at}`                             | filter kategori                           |
+| `media`         | `{used_at, created_at}`                                         | pembersihan foto yatim                    |
+| `ai_usage`      | `{user_id, day}` **unique**                                     | kuota atomik                              |
+| `ai_usage`      | `created_at` TTL 30 hari                                        | auto-bersih                               |
+| `price_catalog` | `{category_code, severity, city}` **unique**                    | satu baris per kombinasi                  |
+
+**Kenapa index unik parsial `{offer_id, technician_id}` + `status: PENDING`?**
+
+Karena Mongo hanya menjamin keunikan pada dokumen yang cocok filter. Teknisi
+boleh punya banyak bid historis (`WITHDRAWN`, `REJECTED`) untuk offer yang sama,
+tapi hanya **satu** yang `PENDING`. Tanpa index ini, dua request bersamaan bisa
+membuat dua bid aktif, dan harga pesaing jadi terlihat.
+
+### Kenapa `bid_count` dihitung ulang
+
+`sync_after_bid_change()` menjalankan `count_documents(status="PENDING")` lalu
+**menulis hasilnya**, bukan `$inc: -1`. Dengan `$inc`, satu kegagalan di tengah
+(proses mati, exception) membuat angka menyimpang selamanya, dan offer dengan
+`bid_count > 0` padahal bid-nya habis tidak akan pernah kembali ke `WAITING`.
+
+---
+
+## 4. kenapa AI tidak menulis rupiah
+
+**Prinsip inti: model AI tidak pernah menghasilkan nominal rupiah.**
+
+Model hanya menjawab dua hal yang tidak butuh angka presisi:
+
+1. ini kategori apa (`PLUMBING`, `ELECTRICAL`, …)
+2. seberapa parah (`RINGAN`, `SEDANG`, `BERAT`)
+
+Rupiah **selalu** disusun server dari `price_catalog`. Kalau data belum cukup,
+server bilang tidak tahu, tidak asal menebak. Model bahasa memang buruk dalam
+mengestimasi angka pasar lokal, dan kesalahan di sini langsung merugikan user.
+
+### Alur estimasi
+
+```
+"Kran wastafel bocor"
+        │
+        ▼
+  AI klasifikasi ──► {category_code: PLUMBING, severity: RINGAN}
+        │                        (atau fallback kata kunci lokal)
+        ▼
+  price_service.estimate(PLUMBING, RINGAN, "Surabaya")
+        │
+        ├─ ada data kota Surabaya?  → pakai (scope: "city")
+        ├─ tidak, ada data nasional? → pakai (scope: "national")
+        └─ tidak ada sama sekali     → estimate: null ("belum cukup data")
+        │
+        ▼
+  min / median / max + sample_count + confidence
+```
+
+Contoh response asli `POST /ai/estimate`:
+
+```json
+{
+  "text": "Kran wastafel diduga bocor pada kartrid atau seal, sehingga air terus menetes…\n\nPerkiraan biaya di Surabaya: Rp50.000 - Rp135.000\n(median Rp75.000, dari 40 kasus serupa)\n\nYang memengaruhi: tingkat kerusakan, akses ke lokasi, dan part yang perlu diganti.",
+  "estimate": {
+    "category_code": "PLUMBING",
+    "category_label": "Air",
+    "severity": "RINGAN",
+    "min": 50000,
+    "median": 75000,
+    "max": 135000,
+    "sample_count": 40,
+    "scope": "city",
+    "city": "Surabaya",
+    "confidence": 0.92,
+    "rough": false
+  },
+  "model": "deepseek-flash",
+  "error": null,
+  "photo_relevant": null
+}
+```
+
+`sample_count` sengaja dikembalikan. Angka dari 3 sampel dan angka dari 40
+sampel tidak boleh tampil sama yakinkan di UI.
+
+### Katalog belajar sendiri
+
+```
+price_samples                     price_catalog
+(bukti mentah)                    (agregat siap pakai)
+├─ SEED (2.520 demo)  ──────►  refresh()  ──►  84 baris
+└─ DEAL (tawaran selesai) ──────────────┘
+```
+
+Setiap tawaran yang selesai dengan `agreed_price ≥ batas minimum` menambah
+satu sampel `DEAL` (idempoten lewat unique index parsial `offer_id`), lalu
+katalog dihitung ulang. Artinya **setiap transaksi nyata membuat estimasi
+berikutnya lebih akurat** — tanpa training ulang model apa pun.
+
+### Fallback tanpa API key
+
+Kalau `AI_API_KEY` kosong, server memakai pengklasifikasi kata kunci lokal.
+Label `model` di response menjadi `"local-heuristic"`, jujur dan bukan pura-pura
+memakai model. Demo tetap jalan penuh tanpa biaya.
+
+---
+
+## 5. Instalasi localhost
+
+### 5.0 Sebelum mulai baca ini dulu
+
+Ada **dua jalur** yang bisa kamu pilih. Pilih sesuai tujuanmu:
+
+| Jalur                              | Cocok untuk                            | Yang bisa dicoba                                    |
+| ---------------------------------- | -------------------------------------- | --------------------------------------------------- |
+| **A — Backend saja**               | menilai API, desain data, tes otomatis | Semua 26 operasi (24 path) lewat Swagger UI, 42 tes |
+| **B — Backend + aplikasi Android** | melihat aplikasi utuh                  | UI Flutter asli + backend                           |
+
+> **Catatan:** aplikasi Flutter di folder `FrontEnd/` **belum bisa
+> diarahkan ke `localhost`**. Alamat backendnya di-hardcode ke satu domain
+> tunnel, tidak bisa diganti lewat `--dart-define`, dan tidak punya konfigurasi
+> CORS maupun `usesCleartextTraffic`. Artinya:
+>
+> - `flutter run -d chrome` → **diblokir browser** (backend tanpa CORS)
+> - `flutter run` di emulator → aplikasi memanggil tunnel, **bukan** backend di laptopmu
+>
+> Itulah kenapa Jalur A ditulis paling lengkap. Jalur B memakai tunnel yang
+> memang sudah tertanam di kode, bukan backend lokal.
+
+---
+
+### 5.1 Requirement
+
+| Perlu                            | Versi / catatan                                          | Cek                 |
+| -------------------------------- | -------------------------------------------------------- | ------------------- |
+| Python                           | **3.12+**                                                | `python3 --version` |
+| [uv](https://docs.astral.sh/uv/) | pengelola paket                                          | `uv --version`      |
+| MongoDB                          | Atlas (cloud) **atau** lokal, wajib mendukung `2dsphere` | —                   |
+| Git                              | —                                                        | `git --version`     |
+| Flutter                          | 3.47+ (hanya Jalur B)                                    | `flutter --version` |
+
+Install `uv` kalau belum ada:
 
 ```bash
-cd BackEnd
+curl -LsSf https://astral.sh/uv/install.sh | sh
+# atau
+pip install uv
 ```
 
-### 2. Install dependency
+**MongoDB lokal (opsional, tanpa Atlas).** Atlas M0 gratis dan tidak perlu
+instal apa pun, jadi ini hanya kalau ingin sepenuhnya offline:
+
+```bash
+docker run -d --name mongo-bantukilat -p 27017:27017 mongo:7
+# lalu di .env:
+# MONGO_URL=mongodb://localhost:27017  (tanpa +srv)
+```
+
+---
+
+### 5.2 Clone
+
+```bash
+git clone https://github.com/UnknownPal21/BantuKilat.git
+cd BantuKilat/BackEnd
+```
+
+---
+
+### 5.3 Pasang dependency
 
 ```bash
 uv sync
 ```
 
-Perintah ini membuat `.venv` dan memasang semua paket dari `uv.lock`.
+Perintah ini membuat `.venv` dan memasang paket **persis sesuai `uv.lock`**.
+Versi tidak akan bergeser antar mesin.
 
-### 3. Siapkan `.env`
+Output yang diharapkan:
+
+```
+Resolved 216 packages in 0.01ms
+Installed 90 packages in 1.23s
+```
+
+---
+
+### 5.4 Buat file `.env`
 
 ```bash
 cp .env.example .env
 ```
 
-Lalu isi file `.env`:
+Lalu edit `.env`. **Minimal tiga nilai ini wajib diisi:**
 
 ```dotenv
 MONGO_URL=mongodb+srv://<user>:<password>@<cluster>.mongodb.net
 MONGO_DB_NAME=bantukilat
-JWT_SECRET=<minimal 32 karakter acak>
-JWT_EXPIRE_MINUTES=10080
-SERVER_SELECTION_TIMEOUT_MS=5000
+JWT_SECRET=<hasil perintah di bawah>
 ```
 
 Membuat `JWT_SECRET` yang aman:
@@ -156,9 +473,23 @@ Membuat `JWT_SECRET` yang aman:
 python3 -c "import secrets; print(secrets.token_urlsafe(48))"
 ```
 
-> Server **menolak start** kalau `JWT_SECRET` kurang dari 32 karakter. Ini disengaja.
+> Server **menolak start** kalau `JWT_SECRET` kurang dari 32 karakter. Ini
+> disengaja, secret pendek membuat token bisa dipalsukan. Kunci ini juga
+> menandatangani URL foto.
 
-Opsional — mengaktifkan AI sungguhan (ganti sesuai provider):
+**MongoDB Atlas, kalau belum punya cluster:**
+
+1. Buat akun di <https://www.mongodb.com/cloud/atlas/register> (M0 gratis).
+2. **Database Access** → _Add New Database User_ → catat username & password.
+   Karakter khusus di password harus di-URL-encode (`@` → `%40`).
+3. **Network Access** → _Add IP Address_ → **Allow Access from Anywhere**
+   (`0.0.0.0/0`) untuk development.
+4. **Connect** → _Drivers_ → salin connection string ke `MONGO_URL`.
+
+Tanpa langkah 3, server gagal dengan `ServerSelectionTimeoutError`.
+
+**Mengaktifkan AI sungguhan (opsional).** Tanpa ini aplikasi tetap jalan
+memakai fallback kata kunci lokal:
 
 ```dotenv
 AI_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai
@@ -166,398 +497,408 @@ AI_MODEL=gemini-2.5-flash
 AI_API_KEY=<api key kamu>
 ```
 
-Contoh provider lain yang sudah dicoba:
+Provider apa pun yang bicara protokol OpenAI-compatible bisa dipakai.
 
-| Provider | `AI_BASE_URL` | `AI_MODEL` |
-|---|---|---|
-| Gemini | `https://generativelanguage.googleapis.com/v1beta/openai` | `gemini-2.5-flash` |
-| DeepSeek (via AIport) | `https://aiport.id/v1` | `deepseek-flash` |
-
-### 4. Siapkan database (index + kategori)
+### 5.5 Siapkan database
 
 ```bash
 uv run python -m backend.db.setup
 ```
 
-Perintah ini idempoten — aman dijalankan berkali-kali. Isinya: membuat index dan schema validator, serta mengisi 7 kategori.
+Output yang diharapkan:
 
-### 5. (Opsional) Isi data demo harga
+```
+categories: 7
+users / offers / bids / media / price_* / ai_* : index terpasang
+```
+
+Perintah ini **idempoten** — jalankan berkali-kali tidak merusak apa pun. Yang
+dipasang: semua index (§3), validator schema `offers`, dan 7 kategori.
+
+> Kalau lewat, semua endpoint tetap 200 tetapi `GET /offers/nearby` gagal karena
+> index `2dsphere` tidak ada.
+
+---
+
+### 5.6 (Opsional) Isi data harga demo
 
 ```bash
 uv run python scripts/seed_price_samples.py
 ```
 
-Menambahkan 2.520 sampel harga demo untuk **Surabaya, Jakarta, Bandung**, lalu menghitung `price_catalog`. Tanpa langkah ini, chat AI masih jalan tetapi akan menjawab "data harga belum cukup".
+Output:
 
-Data nyata (user, offer, bid) tidak disentuh. Untuk menghapus data demo: `db.price_samples.delete_many({"source": "SEED"})` lalu jalankan `scripts/refresh_price_catalog.py`.
+```
+hapus sampel SEED lama: 0
+insert 2520 sampel, tulis 84 baris katalog
+ringkasan: {'samples': 2520, 'catalog_rows': 84, 'seed_samples': 2520, 'deal_samples': 0}
+```
 
-### 6. Jalankan server
+Tanpa langkah ini chat AI masih jalan, tetapi menjawab _"Belum ada cukup data
+harga untuk kasus seperti ini"_ — karena katalog memang kosong.
+
+Data demo hanya untuk **Surabaya, Jakarta, Bandung**. Kota lain otomatis memakai
+data nasional (`scope: "national"`).
+
+Menghapus data demo (data user/offer tidak tersentuh):
+
+```bash
+uv run python - <<'PY'
+import asyncio
+from backend.db.mongo import db
+asyncio.run(db.price_samples.delete_many({"source": "SEED"}))
+PY
+uv run python scripts/refresh_price_catalog.py
+```
+
+---
+
+### 5.7 Jalankan server
 
 ```bash
 uv run fastapi dev src/backend/main.py
 ```
 
-Server berjalan di **http://127.0.0.1:8000**.
+Output yang diharapkan:
 
-| URL | Isi |
-|---|---|
-| http://127.0.0.1:8000/docs | Swagger UI — coba semua endpoint dari browser |
-| http://127.0.0.1:8000/redoc | Dokumentasi read-only |
-| http://127.0.0.1:8000/health | Cek server hidup (`{"status":"ok"}`) |
+```
+INFO:     Uvicorn running on http://127.0.0.1:8000 (Press CTRL+C to quit)
+INFO:     Application startup complete.
+```
 
-Cek cepat dari terminal:
+Buka:
+
+| URL                            | Isi                                               |
+| ------------------------------ | ------------------------------------------------- |
+| <http://127.0.0.1:8000/docs>   | **Swagger UI** — coba semua endpoint dari browser |
+| <http://127.0.0.1:8000/redoc>  | Dokumentasi read-only                             |
+| <http://127.0.0.1:8000/health> | `{"status":"ok"}`                                 |
+
+Verifikasi dari terminal:
 
 ```bash
 curl http://127.0.0.1:8000/health
 # {"status":"ok"}
+
+curl http://127.0.0.1:8000/categories | head -c 200
+# [{"_id":"...","code":"ELECTRICAL","label":"Kelistrikan",...}]
 ```
 
-Untuk production-like (tanpa auto-reload):
+Untuk mode production-like (tanpa auto-reload):
 
 ```bash
 uv run fastapi run src/backend/main.py
 ```
 
-## Menjalankan frontend
+---
 
-### 1. Masuk ke folder app
+### 5.8 Uji alur lengkap dari terminal
 
-```bash
-cd FrontEnd/bantukilat
-```
-
-### 2. Install dependency & jalankan
+Salin tempel berurutan. Butuh `jq` (`sudo apt install jq`).
 
 ```bash
-flutter pub get
+BASE=http://127.0.0.1:8000
+
+# 1) Daftar sebagai USER
+TOKEN=$(curl -s -X POST $BASE/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"role":"USER","name":"Sari","email":"sari@example.com",
+       "phone":"+6281234567890","password":"rahasia123",
+       "city":"Surabaya","district":"Mulyorejo"}' | jq -r .access_token)
+
+echo "token: ${TOKEN:0:20}..."
+
+# 2) Profil sendiri
+curl -s $BASE/auth/me -H "Authorization: Bearer $TOKEN" | jq
 ```
 
-Lalu pilih target:
+Output yang diharapkan pada langkah 2:
 
-```bash
-# Emulator Android (disarankan)
-flutter emulators --launch <nama_emulator>
-flutter run
-
-# HP Android via USB (aktifkan USB debugging)
-flutter devices
-flutter run -d <device-id>
-
-# Web (butuh Chrome; set CHROME_EXECUTABLE kalau Chrome tidak di PATH)
-export CHROME_EXECUTABLE=$(command -v chromium)
-flutter run -d chrome
+```json
+{
+  "_id": "6af85a445e6acca1d4d59749",
+  "role": "USER",
+  "name": "Sari",
+  "email": "sari@example.com",
+  "phone": "+6281234567890",
+  "avatar_url": null
+}
 ```
 
-### 3. Build APK
+Lanjutkan: upload foto → buat offer → teknisi menawar → accept → complete.
+Perintah lengkapnya ada di [§6.4 Alur lengkap](#64-alur-lengkap-curl).
 
-```bash
-flutter build apk --debug     # untuk uji coba
-flutter build apk --release   # untuk dibagikan
-```
+---
 
-Hasil build ada di `build/app/outputs/flutter-apk/`.
+## 6. Referensi API
 
-> **Catatan penting:** halaman login saat ini masih prototipe. Ketik `user` di kolom email untuk membuka halaman user, atau `teknisi` untuk halaman teknisi. Belum ada pemanggilan ke backend dari sisi Flutter.
-
-### Alamat backend dari emulator/HP
-
-Frontend belum punya konfigurasi base URL. Saat nanti disambungkan, pakai alamat berikut:
-
-| Target | Alamat backend |
-|---|---|
-| Emulator Android | `http://10.0.2.2:8000` (`10.0.2.2` = localhost komputer) |
-| HP fisik di Wi-Fi yang sama | `http://<IP-laptop>:8000` — jalankan server dengan `--host 0.0.0.0` |
-| Web / desktop | `http://127.0.0.1:8000` |
-
-Untuk HTTP polos di Android, tambahkan `android:usesCleartextTraffic="true"` pada `<application>` di `android/app/src/main/AndroidManifest.xml`.
-
-## Panduan API cepat
-
-Semua endpoint kecuali `/health` dan `GET /media/{id}` butuh header:
+Base URL lokal: `http://127.0.0.1:8000`. Semua endpoint kecuali yang ditandai
+`–` butuh header:
 
 ```
 Authorization: Bearer <access_token>
 ```
 
-### 1. Register
+### 6.1 Bentuk error
 
-```bash
-curl -X POST http://127.0.0.1:8000/auth/register \
-  -H "Content-Type: application/json" \
-  -d '{
-    "role": "USER",
-    "name": "Sari",
-    "email": "sari@example.com",
-    "phone": "+6281234567890",
-    "password": "rahasia123",
-    "city": "Surabaya",
-    "district": "Mulyorejo"
-  }'
+Semua error — validasi, auth, maupun bisnis — memakai bentuk yang sama:
+
+```json
+{ "code": "INVALID_CREDENTIALS", "message": "Email atau password salah" }
 ```
 
-Untuk teknisi, tambahkan `"skills": ["PLUMBING"]` dan `"terms_accepted": true`.
+Bukan `{"detail": ...}` bawaan FastAPI. Kode mesin ada di `code`; teks manusia
+di `message`.
 
-Response berisi `access_token` dan `user`. Simpan tokennya:
+| Kode                                      | HTTP | Arti                                                     |
+| ----------------------------------------- | ---- | -------------------------------------------------------- |
+| `UNAUTHORIZED`                            | 401  | Token hilang/rusak/kedaluwarsa                           |
+| `INVALID_CREDENTIALS`                     | 401  | Email atau password salah                                |
+| `FORBIDDEN`                               | 403  | Role tidak cocok (mis. user biasa buka endpoint teknisi) |
+| `NOT_OFFER_OWNER`                         | 403  | Bukan pembuat tawaran                                    |
+| `NOT_BID_OWNER`                           | 403  | Bukan pemilik penawaran                                  |
+| `MEDIA_URL_INVALID` / `MEDIA_URL_EXPIRED` | 403  | URL foto rusak / kedaluwarsa                             |
+| `EMAIL_TAKEN`                             | 409  | Email sudah terdaftar                                    |
+| `PHONE_TAKEN`                             | 409  | Nomor WA sudah terdaftar                                 |
+| `OFFER_EXPIRED`                           | 409  | Tawaran sudah lewat `expires_at`                         |
+| `OFFER_NOT_OPEN`                          | 409  | Tawaran sudah tidak menerima penawaran                   |
+| `OFFER_ALREADY_ASSIGNED`                  | 409  | Sudah ada teknisi; tidak bisa dibatalkan/diambil         |
+| `OFFER_ALREADY_COMPLETED`                 | 409  | Sudah diselesaikan                                       |
+| `BID_ALREADY_ACCEPTED`                    | 409  | Bid sudah diterima; tidak bisa ditarik                   |
+| `BID_NOT_PENDING`                         | 409  | Bid sudah tidak aktif                                    |
+| `PHOTO_NOT_UPLOADED`                      | 422  | Data URI dikirim langsung; upload ke `/media` dulu       |
+| `PHOTO_NOT_FOUND`                         | 422  | Id foto bukan milik akun ini                             |
+| `AI_RATE_LIMITED`                         | 429  | Kuota chat/estimasi harian habis                         |
+| `AI_PHOTO_RATE_LIMITED`                   | 429  | Kuota pesan berfoto harian habis                         |
+
+### 6.2 Ringkasan 26 endpoint (24 path)
+
+| Method  | Path                      | Auth         | Keterangan                             |
+| ------- | ------------------------- | ------------ | -------------------------------------- |
+| `GET`   | `/health`                 | –            | Cek server hidup                       |
+| `POST`  | `/auth/register`          | –            | Daftar, langsung dapat token           |
+| `POST`  | `/auth/login`             | –            | Login                                  |
+| `GET`   | `/auth/me`                | ✔            | Profil sendiri                         |
+| `PATCH` | `/auth/me/phone`          | ✔            | Ubah nomor HP                          |
+| `GET`   | `/categories`             | –            | Daftar kategori aktif                  |
+| `POST`  | `/media`                  | ✔            | Upload satu foto (base64)              |
+| `GET`   | `/media/{id}`             | tanda tangan | Ambil foto (`?exp=&sig=`)              |
+| `POST`  | `/offers`                 | ✔            | Buat tawaran                           |
+| `GET`   | `/offers/nearby`          | ✔            | Tawaran dalam radius (`$geoNear`)      |
+| `GET`   | `/offers/mine`            | ✔            | Tawaran milik sendiri                  |
+| `GET`   | `/offers/tasks`           | ✔ teknisi    | Tugas teknisi (`ASSIGNED`/`COMPLETED`) |
+| `GET`   | `/offers/{id}`            | ✔            | Detail tawaran                         |
+| `GET`   | `/offers/{id}/bids`       | ✔            | Daftar penawaran                       |
+| `POST`  | `/offers/{id}/bids`       | ✔ teknisi    | Ajukan penawaran                       |
+| `POST`  | `/offers/{id}/cancel`     | ✔ pemilik    | Batalkan tawaran                       |
+| `POST`  | `/offers/{id}/complete`   | ✔ teknisi    | Tandai selesai                         |
+| `POST`  | `/bids/{id}/accept`       | ✔ pemilik    | Terima penawaran                       |
+| `POST`  | `/bids/{id}/reject`       | ✔ pemilik    | Tolak satu penawaran                   |
+| `POST`  | `/bids/{id}/withdraw`     | ✔ teknisi    | Tarik penawaran sendiri                |
+| `POST`  | `/ai/estimate`            | ✔            | Estimasi tanpa menyimpan chat          |
+| `POST`  | `/ai/chats`               | ✔            | Buat percakapan                        |
+| `GET`   | `/ai/chats`               | ✔            | Daftar percakapan                      |
+| `GET`   | `/ai/chats/{id}`          | ✔            | Isi percakapan                         |
+| `POST`  | `/ai/chats/{id}/messages` | ✔            | Kirim pesan                            |
+| `POST`  | `/ai/chats/{id}/close`    | ✔            | Tutup percakapan                       |
+
+### 6.3 Detail endpoint penting
+
+**`GET /offers/tasks`** — dibuat khusus karena `/nearby` hanya berisi offer
+terbuka. Tanpa endpoint ini, pekerjaan yang sudah diterima teknisi tidak pernah
+bisa ditampilkan.
 
 ```bash
-TOKEN="<access_token dari response>"
+curl "$BASE/offers/tasks?status=ASSIGNED" -H "Authorization: Bearer $TECH"
 ```
 
-### 2. Upload foto
+Query: `status` (opsional), `limit` (1–100, default 50). Urutan `updated_at` menurun.
 
-Foto dikirim sebagai **data URI base64** dalam JSON. Setelah tersimpan, yang kamu terima hanya `id` dan `url` — base64 tidak pernah masuk database.
-
-```bash
-PHOTO_ID=$(base64 -w0 foto-kran.jpg | sed 's|^|data:image/jpeg;base64,|' | \
-  jq -R '{data: ., kind: "offers"}' | \
-  curl -s -X POST http://127.0.0.1:8000/media \
-    -H "Authorization: Bearer $TOKEN" \
-    -H "Content-Type: application/json" -d @- | jq -r .id)
-```
-
-### 3. Buat tawaran
+**`POST /offers/{id}/cancel`** — body opsional:
 
 ```bash
-curl -X POST http://127.0.0.1:8000/offers \
+curl -X POST "$BASE/offers/$OFFER_ID/cancel" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
-  -d "{
-    \"category_id\": \"<id dari GET /categories>\",
+  -d '{"reason":"SALAH_INPUT","note":"Salah alamat"}'
+```
+
+- Hanya pemilik, hanya selama `WAITING`/`NEGOTIATING`.
+- Semua bid `PENDING` di dalamnya ikut menjadi `WITHDRAWN`.
+- Menekan dua kali tetap **200** (idempoten).
+
+**`POST /bids/{id}/withdraw`** — teknisi menarik penawaran. Kalau bid `PENDING`
+terakhir hilang, offer otomatis kembali ke `WAITING` sehingga teknisi lain bisa
+menawar lagi.
+
+### 6.4 Alur lengkap (curl)
+
+```bash
+BASE=http://127.0.0.1:8000
+
+# --- USER: daftar & siapkan tawaran ---
+TOKEN=$(curl -s -X POST $BASE/auth/register -H "Content-Type: application/json" \
+  -d '{"role":"USER","name":"Sari","email":"sari@example.com","phone":"+6281234567890",
+       "password":"rahasia123","city":"Surabaya","district":"Mulyorejo"}' | jq -r .access_token)
+
+CAT=$(curl -s $BASE/categories | jq -r '.[] | select(.code=="PLUMBING") | ._id')
+
+PHOTO_ID=$(base64 -w0 foto-kran.jpg | sed 's|^|data:image/jpeg;base64,|' \
+  | jq -R '{data: ., kind: "offers"}' \
+  | curl -s -X POST $BASE/media -H "Authorization: Bearer $TOKEN" \
+      -H "Content-Type: application/json" -d @- | jq -r .id)
+
+OFFER_ID=$(curl -s -X POST $BASE/offers -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" -d "{
+    \"category_id\": \"$CAT\",
     \"title\": \"Kran wastafel bocor\",
     \"description\": \"Air menetes terus sejak pagi, lantai basah.\",
     \"photos\": [\"$PHOTO_ID\"],
-    \"lng\": 112.7531,
-    \"lat\": -7.2412,
+    \"lng\": 112.7531, \"lat\": -7.2412,
     \"address_text\": \"Jl. Mulyorejo Tengah No. 45\",
-    \"initial_budget\": 20000
-  }"
-```
+    \"initial_budget\": 20000 }" | jq -r ._id)
 
-`photos` menerima **id media** atau **URL `/media/<id>`** — keduanya dinormalisasi menjadi id. Data URI mentah ditolak dengan `422 PHOTO_NOT_UPLOADED`.
+# --- TEKNISI: daftar, lihat sekitar, menawar ---
+TECH=$(curl -s -X POST $BASE/auth/register -H "Content-Type: application/json" \
+  -d '{"role":"TECHNICIAN","name":"Sultan","email":"sultan@example.com",
+       "phone":"+6281298765432","password":"rahasia123",
+       "city":"Surabaya","district":"Mulyorejo",
+       "skills":["PLUMBING"],"terms_accepted":true}' | jq -r .access_token)
 
-### 4. Lihat tawaran di sekitar (teknisi)
+curl -s "$BASE/offers/nearby?lat=-7.2412&lng=112.7531&radius=5000" \
+  -H "Authorization: Bearer $TECH" | jq '.[].title'
 
-```bash
-curl "http://127.0.0.1:8000/offers/nearby?lat=-7.2412&lng=112.7531&radius=5000" \
-  -H "Authorization: Bearer $TOKEN"
-```
+BID_ID=$(curl -s -X POST $BASE/offers/$OFFER_ID/bids \
+  -H "Authorization: Bearer $TECH" -H "Content-Type: application/json" \
+  -d '{"amount":35000,"message":"Bisa saya kerjakan sore ini"}' | jq -r ._id)
 
-### 5. Ajukan penawaran (teknisi)
+# --- USER: terima ---
+curl -s -X POST $BASE/bids/$BID_ID/accept -H "Authorization: Bearer $TOKEN" | jq .status
+# "ASSIGNED"
 
-```bash
-curl -X POST "http://127.0.0.1:8000/offers/<offer_id>/bids" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"amount": 35000, "message": "Bisa saya kerjakan sore ini"}'
-```
+# --- TEKNISI: tugas & selesai ---
+curl -s $BASE/offers/tasks -H "Authorization: Bearer $TECH" | jq '.[].status'
+# "ASSIGNED"
 
-### 6. Terima penawaran (user)
+curl -s -X POST $BASE/offers/$OFFER_ID/complete -H "Authorization: Bearer $TECH" | jq .status
+# "COMPLETED"
 
-```bash
-curl -X POST "http://127.0.0.1:8000/bids/<bid_id>/accept" \
-  -H "Authorization: Bearer $TOKEN"
-```
-
-### 7. Chat AI
-
-```bash
-# Buat percakapan
-CHAT_ID=$(curl -s -X POST http://127.0.0.1:8000/ai/chats \
-  -H "Authorization: Bearer $TOKEN" \
+# --- USER: chat AI dengan foto ---
+CHAT_ID=$(curl -s -X POST $BASE/ai/chats -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" -d '{}' | jq -r ._id)
 
-# Kirim cerita + foto
-curl -X POST "http://127.0.0.1:8000/ai/chats/$CHAT_ID/messages" \
-  -H "Authorization: Bearer $TOKEN" \
-  -H "Content-Type: application/json" \
-  -d "{\"text\": \"Kran wastafel bocor, air menetes terus\", \"photos\": [\"$PHOTO_ID\"]}"
+curl -s -X POST "$BASE/ai/chats/$CHAT_ID/messages" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d "{\"text\":\"Kran wastafel bocor, air menetes terus\",\"photos\":[\"$PHOTO_ID\"]}" \
+  | jq '.estimate'
 ```
 
-Balasan berisi `estimate` (kategori, keparahan, rentang harga + jumlah sampel yang dipakai) dan `assistant_message` (narasi). Kalau provider AI sedang mati, `assistant_message.retryable` bernilai `true` — aman dicoba ulang tanpa mengetik ulang.
+### 6.5 Aturan yang mungkin tidak terduga
 
-### Ringkasan endpoint
+| Aturan                                                          | Alasan                                                                         |
+| --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| `photos` saat buat offer menerima **id** atau URL `/media/<id>` | keduanya dinormalisasi; data URI mentah ditolak                                |
+| Teknisi **tidak bisa** melihat harga bid teknisi lain           | kalau bisa, cukup tawar 1 rupiah lebih murah                                   |
+| Satu teknisi hanya punya **satu bid `PENDING`** per offer       | menawar ulang mengubah nominal bid yang sama                                   |
+| Accept bersifat atomik                                          | bid lain otomatis `REJECTED`; dua accept bersamaan tidak bisa sama-sama menang |
+| `GET /offers/{id}` boleh dibaca siapa pun yang login            | offer memuat foto & lokasi, jadi wajib token                                   |
+| URL foto **kedaluwarsa 1 jam**                                  | id yang bocor lewat log/riwayat tidak cukup membuka foto                       |
+| `GET /media/{id}` tanpa `?exp=&sig=` ditolak `403`              | sengaja, bukan bug                                                             |
 
-| Method | Path | Auth | Keterangan |
-|---|---|---|---|
-| `GET` | `/health` | – | Cek server |
-| `POST` | `/auth/register` | – | Daftar, dapat token |
-| `POST` | `/auth/login` | – | Login, dapat token |
-| `GET` | `/auth/me` | ✔ | Profil sendiri |
-| `PATCH` | `/auth/me/phone` | ✔ | Ubah nomor HP |
-| `GET` | `/categories` | – | Daftar kategori aktif |
-| `POST` | `/media` | ✔ | Upload satu foto (base64) |
-| `GET` | `/media/{id}` | tanda tangan | Ambil foto (`?exp=&sig=`) |
-| `POST` | `/offers` | ✔ | Buat tawaran |
-| `GET` | `/offers/nearby` | ✔ | Tawaran dalam radius |
-| `GET` | `/offers/mine` | ✔ | Tawaran milik sendiri |
-| `GET` | `/offers/{id}` | ✔ | Detail tawaran |
-| `GET` | `/offers/{id}/bids` | ✔ | Daftar penawaran |
-| `POST` | `/offers/{id}/bids` | ✔ teknisi | Ajukan penawaran |
-| `POST` | `/bids/{id}/accept` | ✔ | Terima penawaran |
-| `POST` | `/offers/{id}/complete` | ✔ teknisi | Tandai selesai |
-| `POST` | `/ai/estimate` | ✔ | Estimasi tanpa menyimpan |
-| `POST` | `/ai/chats` | ✔ | Buat percakapan |
-| `GET` | `/ai/chats` | ✔ | Daftar percakapan |
-| `GET` | `/ai/chats/{id}` | ✔ | Isi percakapan |
-| `POST` | `/ai/chats/{id}/messages` | ✔ | Kirim pesan |
-| `POST` | `/ai/chats/{id}/close` | ✔ | Tutup percakapan |
+---
 
-Error selalu berbentuk:
+## 7. Deploy & status proyek
 
-```json
-{ "code": "OFFER_ALREADY_COMPLETED", "message": "Tawaran sudah diselesaikan" }
-```
+### 7.1 Konfigurasi lengkap
 
-Kode yang sering muncul saat development:
+Semua dibaca dari `BackEnd/.env`. Nilai di bawah adalah default kalau kosong.
 
-| Kode | HTTP | Arti |
-|---|---|---|
-| `PHOTO_NOT_UPLOADED` | 422 | Data URI dikirim langsung; upload ke `/media` dulu |
-| `PHOTO_NOT_FOUND` | 422 | Id foto bukan milik akun ini |
-| `MEDIA_URL_INVALID` / `MEDIA_URL_EXPIRED` | 403 | URL foto rusak atau kedaluwarsa (TTL 1 jam) |
-| `AI_RATE_LIMITED` | 429 | Kuota chat/estimasi harian habis |
-| `AI_PHOTO_RATE_LIMITED` | 429 | Kuota pesan berfoto harian habis |
-| `OFFER_ALREADY_COMPLETED` | 409 | Offer sudah selesai (oleh orang lain) |
-| `EMAIL_TAKEN` | 409 | Email sudah terdaftar |
+| Variabel                       | Default                 | Fungsi                                  |
+| ------------------------------ | ----------------------- | --------------------------------------- |
+| `MONGO_URL`                    | — **(wajib)**           | Connection string MongoDB               |
+| `MONGO_DB_NAME`                | — **(wajib)**           | Nama database                           |
+| `JWT_SECRET`                   | — **(wajib, ≥32)**      | Kunci JWT **dan** tanda tangan URL foto |
+| `JWT_EXPIRE_MINUTES`           | `1440`                  | Umur token                              |
+| `SERVER_SELECTION_TIMEOUT_MS`  | `5000`                  | Batas tunggu koneksi Mongo              |
+| `PUBLIC_BASE_URL`              | `http://localhost:8000` | Basis URL foto di response              |
+| `SETUP_ON_STARTUP`             | `true`                  | Pasang index + seed saat startup        |
+| `EXPIRE_JOB_ENABLED`           | `true`                  | Aktifkan job offer kedaluwarsa          |
+| `EXPIRE_CHECK_SECONDS`         | `60`                    | Interval job (minimum 5)                |
+| `MEDIA_MAX_BYTES`              | `6000000`               | Batas ukuran foto                       |
+| `MEDIA_URL_TTL_SECONDS`        | `3600`                  | Umur URL bertanda tangan                |
+| `MEDIA_DAILY_VIEW_LIMIT`       | `600`                   | Batas buka foto per hari                |
+| `MEDIA_DAILY_UPLOAD_LIMIT`     | `60`                    | Batas upload per akun per hari          |
+| `AI_BASE_URL`                  | endpoint Gemini         | Provider OpenAI-compatible              |
+| `AI_MODEL`                     | `gemini-2.5-flash`      | Nama model                              |
+| `AI_API_KEY`                   | kosong                  | Kosong = fallback lokal gratis          |
+| `AI_ALLOW_LOCAL_FALLBACK`      | `true`                  | Izinkan fallback saat key kosong        |
+| `AI_TIMEOUT_SECONDS`           | `30`                    | Timeout panggilan provider              |
+| `AI_HISTORY_MESSAGES`          | `10`                    | Pesan lama yang dikirim sebagai konteks |
+| `AI_DAILY_MESSAGE_LIMIT`       | `20`                    | Kuota chat per hari                     |
+| `AI_DAILY_ESTIMATE_LIMIT`      | `40`                    | Kuota `/ai/estimate` per hari           |
+| `AI_DAILY_PHOTO_MESSAGE_LIMIT` | `10`                    | Kuota pesan berfoto per hari            |
+| `AI_QUOTA_UTC_OFFSET_HOURS`    | `7`                     | Kuota reset tengah malam WIB            |
 
-## Struktur folder
+> `BackEnd/.env` masuk `.gitignore`. Jangan pernah commit file itu.
 
-```
-BantuKilat/
-├── README.md                  ← file ini
-├── BackEnd/
-│   ├── pyproject.toml         dependency & konfigurasi pytest
-│   ├── uv.lock                versi paket terkunci
-│   ├── .env.example           contoh konfigurasi (copy ke .env)
-│   ├── src/backend/
-│   │   ├── main.py            entrypoint FastAPI
-│   │   ├── core/              config, auth, error, rate limit
-│   │   ├── db/                koneksi Mongo, index, seed kategori
-│   │   ├── models/            skema Pydantic
-│   │   ├── routers/           endpoint HTTP
-│   │   └── services/          logika bisnis
-│   ├── scripts/               seed, eval AI, bersih-bersih data
-│   ├── tests/                 tes otomatis (pytest)
-│   └── docs/                  catatan desain (tidak ikut git)
-└── FrontEnd/bantukilat/       aplikasi Flutter
-    ├── lib/main.dart
-    ├── lib/page/              halaman UI
-    └── pubspec.yaml
-```
+### 7.2 Deploy ke FastAPI Cloud
 
-## Konfigurasi
+Aplikasi ini sudah disiapkan untuk FastAPI Cloud. Yang perlu diketahui:
 
-Semua setelan backend dibaca dari `BackEnd/.env`. Nilai di bawah adalah default kalau tidak diisi.
-
-| Variabel | Default | Fungsi |
-|---|---|---|
-| `MONGO_URL` | — **(wajib)** | Connection string MongoDB |
-| `MONGO_DB_NAME` | — **(wajib)** | Nama database |
-| `JWT_SECRET` | — **(wajib, ≥32 karakter)** | Kunci tanda tangan JWT **dan** URL foto |
-| `JWT_EXPIRE_MINUTES` | `1440` | Umur token. Demo memakai `10080` (7 hari) |
-| `PUBLIC_BASE_URL` | `http://localhost:8000` | Basis URL foto di response. Ganti dengan domain asli saat deploy |
-| `AI_BASE_URL` | endpoint Gemini | Base URL provider OpenAI-compatible |
-| `AI_MODEL` | `gemini-2.5-flash` | Nama model |
-| `AI_API_KEY` | kosong | Kosong = fallback lokal gratis |
-| `AI_ALLOW_LOCAL_FALLBACK` | `true` | Izinkan fallback saat key kosong |
-| `AI_TIMEOUT_SECONDS` | `30` | Timeout panggilan provider |
-| `AI_DAILY_MESSAGE_LIMIT` | `20` | Kuota pesan chat per hari |
-| `AI_DAILY_ESTIMATE_LIMIT` | `40` | Kuota `/ai/estimate` per hari |
-| `AI_DAILY_PHOTO_MESSAGE_LIMIT` | `10` | Kuota pesan berfoto per hari |
-| `AI_QUOTA_UTC_OFFSET_HOURS` | `7` | Kuota reset tengah malam WIB |
-| `MEDIA_URL_TTL_SECONDS` | `3600` | Umur URL foto bertanda tangan |
-| `MEDIA_DAILY_VIEW_LIMIT` | `600` | Batas buka foto per IP per hari |
-| `MEDIA_DAILY_UPLOAD_LIMIT` | `60` | Batas upload per akun per hari |
-
-> `BackEnd/.env` di-`.gitignore`. Jangan pernah commit file itu.
-
-## Tes
-
-Semua tes berjalan di database terpisah dan **tidak pernah menyentuh data asli**.
+| Hal                               | Nilai                                                 |
+| --------------------------------- | ----------------------------------------------------- |
+| Application Directory             | **`BackEnd`** (bukan root repo)                       |
+| Entrypoint                        | `backend.main:app` (sudah di `pyproject.toml`)        |
+| Build                             | `uv build` — terverifikasi menghasilkan wheel lengkap |
+| `Dockerfile` / `requirements.txt` | **tidak perlu**, dan jangan ditambahkan               |
 
 ```bash
 cd BackEnd
-uv run pytest -q
+uv build                        # harus sukses
+uv run pytest -q                # harus 42 passed
+git push
+fastapi deploy
 ```
 
-Ekspektasi: **26 passed**.
+**Tiga hal yang wajib benar setelah deploy:**
 
-Tes memaksa `MONGO_DB_NAME=bantukilat_test`, membuat database itu, lalu menghapusnya setelah selesai. Kalau nama database tidak berakhiran `_test`, tes menolak berjalan.
+1. **`PUBLIC_BASE_URL` = domain cloud.** Kalau dibiarkan `localhost`, API tetap
+   membalas 200 tetapi semua foto di aplikasi gagal dimuat.
+2. **`SETUP_ON_STARTUP=true`.** FastAPI Cloud tidak punya hook pre-start, jadi
+   index dan kategori dipasang di `lifespan`. Aman dijalankan banyak instance
+   karena semua operasi idempoten; kegagalannya hanya dicatat di log dan tidak
+   mematikan server.
+3. **IP allowlist Atlas** harus mengizinkan koneksi dari FastAPI Cloud.
 
-Cakupan:
+Verifikasi:
 
-| File | Yang diuji |
-|---|---|
-| `tests/test_media.py` | URL bertanda tangan, tamper, kedaluwarsa, batas harian, purge foto yatim |
-| `tests/test_ai_chat.py` | grounding harga, `photo_relevant`, kuota chat/estimate/foto, refund saat provider mati |
-| `tests/test_offer_deal.py` | alur offer → bid → accept → complete, sampel harga |
-
-## Script bantu
-
-Semua dijalankan dari folder `BackEnd`:
-
-| Perintah | Fungsi |
-|---|---|
-| `uv run python -m backend.db.setup` | Buat index, schema validator, dan seed kategori |
-| `uv run python scripts/seed_price_samples.py` | Isi 2.520 sampel harga demo (idempoten) |
-| `uv run python scripts/refresh_price_catalog.py` | Hitung ulang katalog dari sampel |
-| `uv run python scripts/eval_ai.py` | Uji klasifikasi AI pada 12 kasus (`--provider` untuk model sungguhan, `--csv` untuk simpan hasil) |
-| `uv run python scripts/purge_orphan_media.py` | Laporan foto yatim; `--apply` untuk menghapus |
-| `uv run python scripts/migrate_offer_photos.py` | Migrasi foto lama berbentuk base64 ke collection `media`; `--apply` untuk menulis |
-
-Script yang menulis data **default hanya melaporkan** (dry-run) dan butuh `--apply`.
-
-## Masalah umum
-
-**Server gagal start: `JWT_SECRET minimal 32 karakter`**
-Isi `JWT_SECRET` dengan string acak ≥32 karakter. Lihat [langkah 3](#3-siapkan-env).
-
-**`ServerSelectionTimeoutError`**
-MongoDB tidak bisa dijangkau. Cek `MONGO_URL`, dan pastikan IP laptop sudah di-whitelist di MongoDB Atlas (Network Access).
-
-**Chat menjawab "data harga belum cukup"**
-Belum ada sampel harga untuk kategori/keparahan/kota tersebut. Jalankan `scripts/seed_price_samples.py`. Perhatian: katalog demo hanya punya Surabaya, Jakarta, Bandung — kota lain otomatis memakai data nasional.
-
-**Chat menjawab dengan `model: "local-heuristic"`**
-`AI_API_KEY` kosong. Itu normal dan gratis. Isi `AI_API_KEY` kalau ingin memakai model sungguhan.
-
-**Foto menghasilkan `403 MEDIA_URL_INVALID`**
-URL foto harus memakai `?exp=&sig=` dari response API. Membuka `/media/<id>` tanpa tanda tangan memang ditolak. URL juga kedaluwarsa setelah 1 jam — ambil ulang dari response offer/chat.
-
-**`429 AI_RATE_LIMITED` / `AI_PHOTO_RATE_LIMITED`**
-Kuota harian habis. Kuota reset tengah malam WIB, atau naikkan limit lewat `.env`.
-
-**`flutter doctor` protes Android license / cmdline-tools**
 ```bash
-flutter doctor --android-licenses
-```
-Kalau `cmdline-tools` masih hilang, pasang lewat Android Studio → SDK Manager → *Android SDK Command-line Tools*.
-
-**`flutter doctor` protes `ninja is required` (Linux desktop)**
-Pasang `ninja` dari package manager distro. Hanya perlu kalau menjalankan target Linux desktop.
-
-**`Cannot find Chrome executable`**
-```bash
-export CHROME_EXECUTABLE=$(command -v chromium)
+BASE=https://namaproyek.fastapicloud.dev
+curl -s $BASE/health          # {"status":"ok"}
+curl -s $BASE/categories      # daftar kategori ter-seed
 ```
 
-**Emulator Android tidak terdeteksi**
-```bash
-flutter emulators --launch <nama_emulator>
-# atau
-~/Android/Sdk/platform-tools/adb devices
-```
+### 7.3 Status proyek
 
-## Status proyek
+| Bagian                                                      | Kondisi                                          |
+| ----------------------------------------------------------- | ------------------------------------------------ |
+| Auth (register, login, JWT, profil)                         | ✅ Jalan & teruji                                |
+| Media (upload, kompresi, URL bertanda tangan, batas harian) | ✅ Jalan & teruji                                |
+| Tawaran (create, nearby, mine, detail, cancel, expire)      | ✅ Jalan & teruji                                |
+| Penawaran (bid, accept, reject, withdraw, tasks)            | ✅ Jalan & teruji                                |
+| Chat AI + katalog harga historis                            | ✅ Jalan & teruji                                |
+| Tes otomatis                                                | ✅ 42 lulus                                      |
+| Frontend — UI & tersambung API                              | ✅ Tersambung (12 halaman memakai `AuthService`) |
+| Frontend — konfigurasi base URL & CORS                      | ❌ Hardcode tunnel, tanpa CORS                   |
+| Ulasan / rating teknisi                                     | ❌ Dirancang, belum dikodekan                    |
+| Notifikasi / push                                           | ❌ Belum ada                                     |
+| Pembatalan setelah `ASSIGNED`                               | ❌ Belum ada alurnya                             |
 
-| Bagian | Kondisi |
-|---|---|
-| Backend — auth, offer, bid, media, katalog harga | ✅ Jalan & teruji |
-| Backend — chat AI + fallback lokal | ✅ Jalan & teruji |
-| Tes otomatis | ✅ 26 lulus |
-| Frontend — UI halaman | ⚠️ Prototipe, data masih hardcode |
-| Frontend — tersambung API | ❌ Belum ada |
-| Ulasan / rating | ❌ Belum dikodekan |
-| Job cron offer kedaluwarsa | ❌ Belum ada |
+---
 
-Langkah berikutnya yang paling berdampak: menyambungkan Flutter ke API (login → daftar tawaran → bid → chat AI), lalu membangun ulasan teknologi.
+## Lisensi & atribusi
+
+ Kami Member | 2026
+
+Stack: [FastAPI](https://fastapi.tiangolo.com/) · [MongoDB](https://www.mongodb.com/) ·
+[Flutter](https://flutter.dev/) · [uv](https://docs.astral.sh/uv/)

@@ -17,7 +17,8 @@ async def create_offer(
     return OfferOut(**data_response)
 
 
-# Harus dideklarasikan sebelum route dinamis (/{offer_id}) kalau nanti ada.
+# Route statis (/nearby, /mine, /tasks) wajib di atas route dinamis
+# (/{offer_id}); kalau tidak, "nearby" dibaca sebagai offer_id.
 @router.get("/nearby", response_model=list[OfferOut])
 async def nearby_offers(
     lng: float = Query(ge=-180, le=180),
@@ -40,6 +41,18 @@ async def my_offers(
     limit: int = Query(default=20, ge=1, le=50),
 ) -> list[OfferOut]:
     data_response = await offer_service.mine(user, status_filter, limit)
+    return [OfferOut(**item) for item in data_response]
+
+
+@router.get("/tasks", response_model=list[OfferOut])
+async def my_tasks(
+    # Kepemilikan teknisi dicek dari dokumen user, bukan role token.
+    user: dict = Depends(require_role("TECHNICIAN")),
+    status_filter: OfferStatus | None = Query(default=None, alias="status"),
+    limit: int = Query(default=50, ge=1, le=100),
+) -> list[OfferOut]:
+    """Tugas untuk teknisi yang sedang login (ASSIGNED / COMPLETED)."""
+    data_response = await offer_service.tasks(user, status_filter, limit)
     return [OfferOut(**item) for item in data_response]
 
 
