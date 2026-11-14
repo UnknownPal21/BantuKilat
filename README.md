@@ -9,11 +9,12 @@ Aplikasi bantu-tetangga untuk kerusakan rumah kecil (kran bocor, MCB anjlok, pri
 1. [Masalah yang dipecahkan](#1-masalah-yang-dipecahkan)
 2. [Arsitektur & alur data](#2-arsitektur-alur-data)
 3. [Rancangan data MongoDB](#3-rancangan-data-mongodb)
-4. [Mesin harga: kenapa AI tidak menulis rupiah](#4-mesin-harga-kenapa-ai-tidak-menulis-rupiah)
+4. [Mesin harga: kenapa AI tidak menulis rupiah](#4-kenapa-ai-tidak-menulis-rupiah)
 5. [Instalasi localhost](#5-instalasi-localhost)
-6. [Referensi API](#6-referensi-api)
-7. [Tes & kualitas](#7-tes-kualitas)
-8. [Deploy & status proyek](#8-deploy-status-proyek)
+6. [Dokumentasi frontend](#6-dokumentasi-frontend)
+7. [Referensi API](#7-referensi-api)
+8. [Tes & kualitas](#8-tes-kualitas)
+9. [Deploy & status proyek](#9-deploy-status-proyek)
 
 ---
 
@@ -229,7 +230,7 @@ Keuntungannya: satu layar butuh 1–2 query, bukan 6 join.
 | `price_samples`    | Riwayat harga (seed + deal nyata)                         | 2.520 seed  |
 | `price_catalog`    | Agregat harga per kategori × keparahan × kota             | 84 baris    |
 
-`reviews` **belum dibuat**, dirancang tapi belum dikodekan (lihat §8).
+`reviews` **belum dibuat**, dirancang tapi belum dikodekan (lihat §9.3).
 
 ### Field penting `offers`
 
@@ -382,18 +383,54 @@ Ada **dua jalur** yang bisa kamu pilih. Pilih sesuai tujuanmu:
 | Jalur                              | Cocok untuk                            | Yang bisa dicoba                                    |
 | ---------------------------------- | -------------------------------------- | --------------------------------------------------- |
 | **A — Backend saja**               | menilai API, desain data, tes otomatis | Semua 26 operasi (24 path) lewat Swagger UI, 42 tes |
-| **B — Backend + aplikasi Android** | melihat aplikasi utuh                  | UI Flutter asli + backend                           |
+| **B — Backend + aplikasi Flutter** | melihat aplikasi utuh                  | UI Flutter asli + backend                           |
 
-> **Catatan:** aplikasi Flutter di folder `FrontEnd/` **belum bisa
-> diarahkan ke `localhost`**. Alamat backendnya di-hardcode ke satu domain
-> tunnel, tidak bisa diganti lewat `--dart-define`, dan tidak punya konfigurasi
-> CORS maupun `usesCleartextTraffic`. Artinya:
->
-> - `flutter run -d chrome` → **diblokir browser** (backend tanpa CORS)
-> - `flutter run` di emulator → aplikasi memanggil tunnel, **bukan** backend di laptopmu
->
-> Itulah kenapa Jalur A ditulis paling lengkap. Jalur B memakai tunnel yang
-> memang sudah tertanam di kode, bukan backend lokal.
+Pilihan jalur tidak mengubah cara frontend terhubung ke backend. Itu diatur oleh
+**satu konstanta** di `FrontEnd/bantukilat/lib/services/auth_service.dart`
+(baris 7–8):
+
+```dart
+static const String _baseUrl = '…';
+```
+
+Alamat itulah yang ditembak setiap request dari aplikasi. Selama pengembangan
+proyek ini, nilainya diarahkan ke **backend yang berjalan lokal di laptop
+developer**; setelah deploy, nilainya diarahkan ke **domain cloud**. Tiga
+kemungkinan yang perlu kamu pahami:
+
+| Mode                              | Backend berjalan di   | `_baseUrl`                              | Perlu tunnel? |
+| --------------------------------- | --------------------- | --------------------------------------- | ------------- |
+| **1. Satu laptop**                | laptop yang sama      | `http://localhost:8000` atau `http://10.0.2.2:8000` di emulator | tidak         |
+| **2. Kolaborasi (yang dipakai proyek ini)** | laptop developer | domain tunnel, mis. `https://xxxx.opentunnel.xyz` | **ya**        |
+| **3. Sudah deploy**               | FastAPI Cloud         | `https://bantukilat.fastapicloud.dev`   | tidak         |
+
+**Mode 1 — satu laptop.** FE dan BE dijalankan di mesin yang sama. `localhost`
+memang menunjuk ke laptop itu, jadi tidak ada perantara. Di emulator Android,
+pakai `10.0.2.2` karena `localhost` di dalam emulator menunjuk ke emulator itu
+sendiri, bukan ke laptop.
+
+**Mode 2 — kolaborasi lewat tunnel** (ini yang dipakai selama pengembangan).
+Backend tetap berjalan **lokal di laptop satu orang**, tetapi `localhost` tidak
+bisa dipakai dari perangkat lain: `localhost` selalu berarti "mesin ini". Jadi
+laptop itu membuat tunnel — sebuah domain publik yang meneruskan trafik ke
+`localhost:8000` di mesin tersebut. Alurnya:
+
+```
+HP/laptop teman  →  https://xxxx.opentunnel.xyz  →  tunnel  →  localhost:8000 di laptop developer
+```
+
+Temanmu menembak domain tunnel, bukan `localhost`, tetapi yang menjawab tetap
+backend lokal. Tunnel hanya jembatan; tidak ada server tambahan.
+
+**Mode 3 — sudah deploy.** Backend berjalan di FastAPI Cloud, jadi aplikasi
+langsung menunjuk domain `https://bantukilat.fastapicloud.dev` dan tidak
+memerlukan laptop siapa pun tetap menyala.
+
+> **Catatan:** alamat di `_baseUrl` **tidak bisa** diganti lewat `--dart-define`;
+> harus diedit di kode. Backend juga belum punya middleware CORS, sehingga
+> `flutter run -d chrome` diblokir browser — pakai emulator atau perangkat
+> Android. Cara memilih alamat untuk tiap mode ada di
+> [§6.8.1](#681-memilih-alamat-backend).
 
 ---
 
@@ -626,11 +663,251 @@ Output yang diharapkan pada langkah 2:
 ```
 
 Lanjutkan: upload foto → buat offer → teknisi menawar → accept → complete.
-Perintah lengkapnya ada di [§6.4 Alur lengkap](#64-alur-lengkap-curl).
+Perintah lengkapnya ada di [§7.4 Alur lengkap](#74-alur-lengkap-curl).
 
 ---
 
-## 6. Referensi API
+## 6. Dokumentasi frontend
+
+Aplikasi klien ada di `FrontEnd/bantukilat/`, **Flutter** (Dart), satu basis kode
+untuk Android, iOS, dan web. Bagian ini menjelaskan apa yang benar-benar ada di
+kode, termasuk batasannya.
+
+### 6.1 Framework & dependency
+
+| Hal                  | Nilai                                                    |
+| -------------------- | -------------------------------------------------------- |
+| Framework            | Flutter (Material 3), Dart SDK `^3.13.7`                 |
+| Versi aplikasi       | `0.1.0+1`                                                |
+| State management     | **tanpa paket** — `StatefulWidget` + `setState`          |
+| Lapisan data         | satu kelas statis `AuthService`, langsung `package:http` |
+| Penyimpanan sesi     | `flutter_secure_storage` (token JWT + profil)            |
+| Build target Android | `compileSdk 36`, `applicationId com.example.bantukilat`  |
+| Tes otomatis         | **belum ada** — folder `test/` kosong                    |
+
+Dependency (`pubspec.yaml`):
+
+| Paket                    | Versi   | Dipakai untuk                                      |
+| ------------------------ | ------- | -------------------------------------------------- |
+| `http`                   | ^1.1.0  | semua panggilan REST ke backend                    |
+| `flutter_secure_storage` | 11.2.0  | simpan `access_token` & `user_profile`             |
+| `image_picker`           | ^1.2.4  | ambil foto dari kamera/galeri                      |
+| `flutter_image_compress` | ^2.4.0  | perkecil foto sebelum base64                       |
+| `flutter_map`            | ^8.3.2  | peta OpenStreetMap (tile `tile.openstreetmap.org`) |
+| `geolocator`             | ^14.1.2 | koordinat user untuk `GET /offers/nearby`          |
+| `geocoding`              | ^5.0.1  | koordinat → teks alamat                            |
+| `flutter_svg`            | ^2.4.0  | render `assets/logo/logo.svg`                      |
+
+Catatan: `geocoding` dipakai lebih tipis, pencarian alamat
+manual memakai **Nominatim** (OpenStreetMap) lewat `http`, lihat `DetailTawaran.dart`,
+`HomePageTeknisi.dart`, dan `TawaranSaya.dart`.
+
+### 6.2 Struktur folder
+
+```
+FrontEnd/bantukilat/
+├── pubspec.yaml                 dependency + daftar aset
+├── lib/
+│   ├── main.dart                MaterialApp + cek sesi saat start
+│   ├── services/
+│   │   └── auth_service.dart    SEMUA panggilan API + token (417 baris)
+│   └── page/
+│       ├── splash_screen.dart   layar transisi
+│       ├── loginpage.dart       masuk + tautan daftar
+│       ├── registerpage.dart    daftar sebagai USER
+│       ├── forgotpassword.dart  halaman lupa kata sandi
+│       ├── SideBar.dart         drawer navigasi bersama
+│       ├── DetailTawaran.dart   detail tawaran + peta + bid (1499 baris)
+│       ├── user/
+│       │   ├── HomePageUser.dart     beranda user
+│       │   ├── TawaranSaya.dart      buat tawaran + kamera (2041 baris)
+│       │   └── ListMyTawaran.dart    daftar tawaran saya + terima bid
+│       └── teknisi/
+│           ├── HomePageTeknisi.dart  beranda teknisi + peta
+│           ├── ListTawaranPage.dart  tawaran di sekitar
+│           ├── TugasSaya.dart        tugas yang diambil
+│           └── RegisterTeknisi.dart  daftar sebagai teknisi
+└── assets/
+    ├── logo/   LogoBulat.png, logo.svg, logo.webp
+    └── images/ dummy.png (placeholder)
+```
+
+Tidak ada folder `models/`, `widgets/`,
+atau `providers/`, model data diperlakukan sebagai `Map<String, dynamic>` yang
+dikembalikan `AuthService`, dan widget kecil ditulis inline di file halaman.
+
+### 6.3 Alur navigasi
+
+`main.dart` memanggil `AuthService.validateSession()` **sebelum** layar pertama
+muncul, lalu memilih rute berdasarkan role:
+
+```
+main() → validateSession()
+   ├─ token tidak ada / kedaluwarsa ──► SplashScreen → LoginPage
+   └─ role TECHNICIAN ────────────────► SplashScreen → HomePageTeknisi
+      role USER ──────────────────────► SplashScreen → HomePageUser
+```
+
+Dari `LoginPage`: `RegisterPage` (daftar user), `RegisterTeknisi` (daftar
+teknisi), `ForgotPasswordPage`. Setelah login sukses, `Navigate.pushAndRemoveUntil`
+membuang tumpukan lama supaya tombol _back_ tidak kembali ke halaman login.
+
+### 6.4 Peta layar → endpoint
+
+Setiap layar memanggil `AuthService`, yang menerjemahkannya ke REST backend.
+Tabel ini memudahkan menelusuri "layar ini butuh API apa".
+
+| Layar                          | Metode `AuthService` yang dipakai                                              |
+| ------------------------------ | ------------------------------------------------------------------------------ |
+| `splash_screen.dart`           | `validateSession`                                                              |
+| `loginpage.dart`               | `login`                                                                        |
+| `registerpage.dart`            | `register` (role `USER`)                                                       |
+| `teknisi/RegisterTeknisi.dart` | `register` (role `TECHNICIAN` + `skills`)                                      |
+| `user/HomePageUser.dart`       | `getCurrentUser`, `logout`                                                     |
+| `user/TawaranSaya.dart`        | `getCategories`, `uploadMedia`, `createOffer`                                  |
+| `user/ListMyTawaran.dart`      | `getMyOffers`, `getMediaUrl`, `getOfferBidsByStatus`, `acceptBid`, `rejectBid` |
+| `teknisi/HomePageTeknisi.dart` | `getNearbyOffers`, `getOffer`, `getMediaUrl`, `getCurrentUser`, `logout`       |
+| `teknisi/ListTawaranPage.dart` | `getNearbyOffers`, `getMediaUrl`                                               |
+| `teknisi/TugasSaya.dart`       | `getMyTasks`, `getMediaUrl`, `completeOffer`                                   |
+| `DetailTawaran.dart`           | `getOffer`, `getCurrentUser`, `getToken`, `placeBid`, `acceptBid`              |
+
+### 6.5 Cara kerja sesi & token
+
+- `AuthService` adalah kelas dengan **semua anggota statis**; tidak ada instance.
+- `login`/`register` menyimpan `access_token` dan `user_profile` (JSON) ke
+  `flutter_secure_storage`. Token backend berumur **7 hari** (`expires_in: 604800`).
+- Setiap request berautentikasi memakai `_authorizedRequest()`, yang membaca token
+  lalu menambahkan header `Authorization: Bearer …`.
+- `logout` menghapus kedua kunci dan memaksa kembali ke halaman login.
+- `validateSession` memanggil `GET /auth/me`. Jika 401, sesi dianggap mati.
+
+### 6.6 Alur foto (paling sering salah paham)
+
+```
+image_picker → flutter_image_compress → base64 (data URI)
+        │
+        ▼
+POST /media   { data: "data:image/png;base64,…", kind: "offers" }
+        │                 ← butuh header Authorization
+        ▼
+{ id, url, width, height, size }        url = PUBLIC_BASE_URL + tanda tangan
+        │
+        ▼
+POST /offers  { photos: ["<id>"] }      kirim ID, bukan data URI
+```
+
+Dua hal yang menggagalkan alur ini kalau salah:
+
+1. **Kirim `id`, bukan `url`.** `OfferCreateIn` menolak string yang dimulai
+   `data:` atau lebih panjang dari 300 karakter (`models/offer.py`). URL bertanda
+   tangan panjangnya bisa melewati batas itu, jadi pakai `response['id']`.
+2. **`getMediaUrl(fileId)` di Flutter salah kaprah.** Backend tidak punya endpoint
+   `GET /media/<id>/url`; fungsi ini akan selalu gagal. URL foto sebenarnya sudah
+   ikut di setiap response: `OfferOut.photos` berisi URL bertanda tangan yang
+   dibuat ulang oleh server di setiap request.
+
+### 6.7 Aset
+
+| Path                        | Dipakai di                      |
+| --------------------------- | ------------------------------- |
+| `assets/logo/logo.svg`      | logo utama (via `flutter_svg`)  |
+| `assets/logo/LogoBulat.png` | ikon bulat / splash             |
+| `assets/logo/logo.webp`     | cadangan ukuran ringan          |
+| `assets/images/dummy.png`   | placeholder saat foto belum ada |
+
+Kedua folder didaftarkan di `pubspec.yaml`. **Menambah aset wajib** memperbarui
+daftar `assets:` di file itu, kalau tidak aplikasi gagal memuatnya saat runtime.
+
+### 6.8 Menjalankan frontend
+
+Prasyarat: `Flutter 3.47+` dan backend yang bisa dijangkau (lihat [§5](#5-instalasi-localhost)).
+
+**Yang ditembak aplikasi** ditentukan satu konstanta `_baseUrl` di
+`lib/services/auth_service.dart`. Nilainya berbeda per mode kerja — ringkasnya
+lihat [§5.0](#50-sebelum-mulai-baca-ini-dulu), alamat lengkapnya di
+[§6.8.1](#681-memilih-alamat-backend). Saat ini nilainya adalah domain cloud:
+
+```
+https://bantukilat.fastapicloud.dev
+```
+
+Artinya `flutter run` langsung bicara dengan server produksi — data yang kamu
+buat dari aplikasi masuk ke database sungguhan, bukan salinan lokal.
+
+```bash
+cd FrontEnd/bantukilat
+
+# 1) Ambil dependency
+flutter pub get
+
+# 2) Cek perangkat yang tersedia
+flutter devices
+
+# 3) Jalankan
+flutter run            # pilih perangkat dari daftar
+flutter run -d chrome  # khusus web, lihat peringatan di bawah
+```
+
+Keterbatasan yang harus kamu tahu sebelum menjalankannya:
+
+| Masalah                           | Akibat                                                                              | Status             |
+| --------------------------------- | ----------------------------------------------------------------------------------- | ------------------ |
+| Base URL **di-hardcode**          | harus diedit di kode; tidak bisa diganti saat build lewat `--dart-define`            | lihat §6.8.1       |
+| Backend **tanpa middleware CORS** | `flutter run -d chrome` diblokir browser                                             | belum ditambahkan  |
+| Tanpa `usesCleartextTraffic`      | Android menolak `http://` polos; alamat `https://` (tunnel/cloud) aman               | belum diatur       |
+| `rating` di model teknisi         | selalu `null` — fitur ulasan belum ada di backend                                    | menunggu fitur     |
+
+### 6.8.1 Memilih alamat backend
+
+Alamat backend **tidak bisa** diubah lewat `--dart-define`. Caranya mengedit satu
+konstanta di `lib/services/auth_service.dart` (baris 7–8), lalu jalankan ulang
+aplikasi:
+
+```dart
+static const String _baseUrl =
+    'https://bantukilat.fastapicloud.dev';
+```
+
+Pilih nilai sesuai mode (lihat [§5.0](#50-sebelum-mulai-baca-ini-dulu)):
+
+| Mode                                  | Nilai `_baseUrl`                     | Catatan                                              |
+| ------------------------------------- | ------------------------------------ | ---------------------------------------------------- |
+| **Satu laptop** — emulator Android    | `http://10.0.2.2:8000`               | `localhost` di emulator menunjuk emulator itu sendiri |
+| **Satu laptop** — perangkat lain      | `http://<IP-LAN-laptop>:8000`        | mis. `http://192.168.1.10:8000`, satu jaringan Wi-Fi  |
+| **Kolaborasi** — lewat tunnel         | `https://<domain-tunnel>`            | domain diteruskan ke `localhost:8000` di laptop developer |
+| **Sudah deploy**                      | `https://bantukilat.fastapicloud.dev` | tidak butuh laptop siapa pun tetap menyala           |
+
+Dua hal yang mudah terlewat saat memakai backend lokal:
+
+1. **`PUBLIC_BASE_URL` harus sepasang.** Di `BackEnd/.env`, set nilainya sama
+   dengan alamat yang dipakai aplikasi (termasuk domain tunnel). Kalau tidak,
+   URL foto di response menunjuk ke host yang salah dan gambar gagal dimuat
+   (lihat [§9.1](#91-konfigurasi-lengkap)).
+2. **Tunnel harus menyala.** Domain tunnel hanya bekerja selama proses tunnel
+   dan backend di laptop developer sama-sama berjalan. Kalau laptop tidur atau
+   tunnel ditutup, semua request dari aplikasi gagal.
+
+Untuk mode kolaborasi, alur lengkapnya:
+
+```bash
+# di laptop developer (backend lokal)
+cd BackEnd
+uv run fastapi dev src/backend/main.py        # http://127.0.0.1:8000
+
+# terminal lain, buka tunnel ke port yang sama
+<perintah-tunnel> --port 8000                 # menghasilkan https://xxxx.opentunnel.xyz
+
+# set agar URL foto memakai domain tunnel
+# BackEnd/.env
+PUBLIC_BASE_URL=https://xxxx.opentunnel.xyz
+
+# di mesin teman, arahkan aplikasi ke domain tunnel
+# FrontEnd/bantukilat/lib/services/auth_service.dart
+static const String _baseUrl = 'https://xxxx.opentunnel.xyz';
+```
+
+Setelah backend di-deploy, cukup ganti `_baseUrl` ke domain cloud — tunnel tidak
+lagi diperlukan.
 
 Base URL lokal: `http://127.0.0.1:8000`. Semua endpoint kecuali yang ditandai
 `–` butuh header:
@@ -639,7 +916,9 @@ Base URL lokal: `http://127.0.0.1:8000`. Semua endpoint kecuali yang ditandai
 Authorization: Bearer <access_token>
 ```
 
-### 6.1 Bentuk error
+## 7. Referensi API
+
+### 7.1 Bentuk error
 
 Semua error — validasi, auth, maupun bisnis — memakai bentuk yang sama:
 
@@ -671,7 +950,7 @@ di `message`.
 | `AI_RATE_LIMITED`                         | 429  | Kuota chat/estimasi harian habis                         |
 | `AI_PHOTO_RATE_LIMITED`                   | 429  | Kuota pesan berfoto harian habis                         |
 
-### 6.2 Ringkasan 26 endpoint (24 path)
+### 7.2 Ringkasan 26 endpoint (24 path)
 
 | Method  | Path                      | Auth         | Keterangan                             |
 | ------- | ------------------------- | ------------ | -------------------------------------- |
@@ -702,7 +981,7 @@ di `message`.
 | `POST`  | `/ai/chats/{id}/messages` | ✔            | Kirim pesan                            |
 | `POST`  | `/ai/chats/{id}/close`    | ✔            | Tutup percakapan                       |
 
-### 6.3 Detail endpoint penting
+### 7.3 Detail endpoint penting
 
 **`GET /offers/tasks`** — dibuat khusus karena `/nearby` hanya berisi offer
 terbuka. Tanpa endpoint ini, pekerjaan yang sudah diterima teknisi tidak pernah
@@ -731,7 +1010,7 @@ curl -X POST "$BASE/offers/$OFFER_ID/cancel" \
 terakhir hilang, offer otomatis kembali ke `WAITING` sehingga teknisi lain bisa
 menawar lagi.
 
-### 6.4 Alur lengkap (curl)
+### 7.4 Alur lengkap (curl)
 
 ```bash
 BASE=http://127.0.0.1:8000
@@ -793,7 +1072,7 @@ curl -s -X POST "$BASE/ai/chats/$CHAT_ID/messages" \
   | jq '.estimate'
 ```
 
-### 6.5 Aturan yang mungkin tidak terduga
+### 7.5 Aturan yang mungkin tidak terduga
 
 | Aturan                                                          | Alasan                                                                         |
 | --------------------------------------------------------------- | ------------------------------------------------------------------------------ |
@@ -807,9 +1086,47 @@ curl -s -X POST "$BASE/ai/chats/$CHAT_ID/messages" \
 
 ---
 
-## 7. Deploy & status proyek
+## 8. Tes & kualitas
 
-### 7.1 Konfigurasi lengkap
+### 8.1 Suite backend
+
+```bash
+cd BackEnd
+uv run pytest -q
+```
+
+**42 tes** di 5 file, ±60 detik (backend memakai MongoDB sungguhan, bukan mock):
+
+| File                            | Tes | Cakupan                                                           |
+| ------------------------------- | --- | ----------------------------------------------------------------- |
+| `tests/test_media.py`           | 12  | unggah foto, validasi MIME, tanda tangan URL, kedaluwarsa         |
+| `tests/test_ai_chat.py`         | 13  | estimasi AI, kuota harian, fallback tanpa API key                 |
+| `tests/test_offer_lifecycle.py` | 12  | cancel, reject, withdraw, job `EXPIRED`, hitung ulang `bid_count` |
+| `tests/test_offer_tasks.py`     | 4   | `GET /offers/tasks` untuk pekerjaan teknisi                       |
+| `tests/test_offer_deal.py`      | 1   | alur offer → bid → accept → complete                              |
+
+Tes butuh `MONGO_URL` yang bisa ditulisi (lihat [§5.5](#55-siapkan-database)).
+Tanpa `AI_API_KEY`, tes AI tetap lulus karena jalur fallback yang diuji.
+
+### 8.2 Status tes frontend
+
+Belum ada tes otomatis: folder `FrontEnd/bantukilat/test/` tidak ada. Verifikasi
+UI masih manual lewat `flutter run`. Ini batasan yang disadari, bukan kelalaian
+yang tersembunyi.
+
+### 8.3 Pemeriksaan cepat
+
+```bash
+# jumlah operasi API yang terekspos
+cd BackEnd && uv run python -c "from backend.main import app; s=app.openapi(); print(len(s['paths']), sum(len(v) for v in s['paths'].values()))"
+# 24 26
+```
+
+---
+
+## 9. Deploy & status proyek
+
+### 9.1 Konfigurasi lengkap
 
 Semua dibaca dari `BackEnd/.env`. Nilai di bawah adalah default kalau kosong.
 
@@ -841,7 +1158,7 @@ Semua dibaca dari `BackEnd/.env`. Nilai di bawah adalah default kalau kosong.
 
 > `BackEnd/.env` masuk `.gitignore`. Jangan pernah commit file itu.
 
-### 7.2 Deploy ke FastAPI Cloud
+### 9.2 Deploy ke FastAPI Cloud
 
 Aplikasi ini sudah disiapkan untuk FastAPI Cloud. Yang perlu diketahui:
 
@@ -878,7 +1195,7 @@ curl -s $BASE/health          # {"status":"ok"}
 curl -s $BASE/categories      # daftar kategori ter-seed
 ```
 
-### 7.3 Status proyek
+### 9.3 Status proyek
 
 | Bagian                                                      | Kondisi                                          |
 | ----------------------------------------------------------- | ------------------------------------------------ |
@@ -889,7 +1206,8 @@ curl -s $BASE/categories      # daftar kategori ter-seed
 | Chat AI + katalog harga historis                            | ✅ Jalan & teruji                                |
 | Tes otomatis                                                | ✅ 42 lulus                                      |
 | Frontend — UI & tersambung API                              | ✅ Tersambung (12 halaman memakai `AuthService`) |
-| Frontend — konfigurasi base URL & CORS                      | ❌ Hardcode tunnel, tanpa CORS                   |
+| Frontend — cara menghubungkan ke backend                    | ✅ 3 mode terdokumentasi (§5.0): satu laptop, tunnel, cloud |
+| Frontend — konfigurasi base URL & CORS                      | ⚠️ `_baseUrl` diedit di kode; belum `--dart-define`, tanpa CORS |
 | Ulasan / rating teknisi                                     | ❌ Dirancang, belum dikodekan                    |
 | Notifikasi / push                                           | ❌ Belum ada                                     |
 | Pembatalan setelah `ASSIGNED`                               | ❌ Belum ada alurnya                             |

@@ -7,6 +7,7 @@ authors = [{ name = "Danannme", email = "noragamiaragotoyato92@gmail.com" }]
 requires-python = ">=3.12"
 dependencies = [
     "argon2-cffi>=25.1.0",
+    "fastapi-cloud-cli>=0.28.0",
     "fastapi[standard]>=0.162.2",
     "httpx>=0.28.1",
     "pillow>=13.0.0",
